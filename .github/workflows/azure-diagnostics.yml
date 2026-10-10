@@ -46,3 +46,6 @@ jobs:
       - name: Inspect Terraform lock metadata without reading state contents
         run: |
           az storage blob show --account-name stlptf7dde6178 --container-name tfstate --name ledgerpilot/poc.tfstate --auth-mode login --query metadata -o json | python3 -c 'import sys,json,base64; data=json.load(sys.stdin); value=next((v for k,v in data.items() if k.lower()=="terraformlockid"),""); print(base64.b64decode(value).decode() if value else "No state lock")'
+      - name: Recent failed provisioning operations
+        run: |
+          az monitor activity-log list --resource-group rg-ledgerpilot-7dde6178 --offset 30m --status Failed --query '[].{time:eventTimestamp,resource:resourceId,operation:operationName.value,error:properties.statusMessage}' -o json

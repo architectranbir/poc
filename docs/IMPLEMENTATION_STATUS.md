@@ -95,3 +95,8 @@ Compiled smoke changes an isolated source rate/amount after an adjustment and ve
 LedgerPilot.SapSimulator is a separate ASP.NET process with its own exclusive local state file. Create/retrieve/lookup/post contracts use persisted command keys and reject changed-content reuse or stale posting state. Concurrent repeated commands produce one document/posting reference and recover the same values after restart. The compiled HTTP smoke is included in CI.
 
 Release build and concurrent/restart smoke pass. This is a local trusted-command simulator, not a real SAP API and not yet connected to the billing worker. Service authentication, accrual APIs, PostgreSQL persistence, outbox/inbox, Durable Functions and Service Bus execution remain pending. Production simulator startup is disabled.
+
+## Separate worker and lost-response reconciliation
+A separate one-pass .NET worker consumes local command files and calls the separate simulator over HTTP. It persists content-bound receipts and reconciles creates by external key and posts by document/state/post-command key. Fault injection commits source state then returns HTTP 503; a fresh worker process recovers the same effect. Build and HTTP fault/restart tests pass.
+
+This establishes the process/contract boundary only. Billing API publication, transactional outbox/inbox, Service Bus consumer, Durable orchestration, service authentication and dead-letter policy remain pending. No live SAP/Service Bus action has been executed.

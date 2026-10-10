@@ -128,6 +128,16 @@ def run():
             assert audit[0]["before"]["bill"] - audit[0]["after"]["bill"] == 1
             assert audit[0]["reason"] == adjustment["reason"]
             assert audit[0]["actor"] == p["requestor"]
+            assert audit[0]["provenance"].startswith("Immutable")
+            source_path = Path(env["SEED_PATH"]) / "wip-lines.json"
+            original_source = source_path.read_text()
+            changed_source = json.loads(original_source)
+            changed_line = next(x for x in changed_source if x["id"] == adjustment["lineId"])
+            changed_line["rate"] += 1
+            changed_line["amount"] += 1
+            source_path.write_text(json.dumps(changed_source))
+            assert request(f"/api/projects/{p['id']}/adjustments")[0] == audit[0]
+            source_path.write_text(original_source)
             request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, amount=2), expected=400)
             request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="too-much", amount=100000000), expected=400)
             fresh = request(f"/api/projects/{p['id']}/pbd", dict(body, idempotencyKey="fresh"))
@@ -161,7 +171,7 @@ def run():
                     assert restored["total"] == snapshot["total"] - 2
                     restored_audit = request(f"/api/projects/{p['id']}/adjustments")
                     assert len(restored_audit) == 2
-                    assert restored_audit[0]["at"] == audit[0]["at"]
+                    assert restored_audit[0] == audit[0]
                     request(f"/api/projects/{p['id']}/adjustments", adjustment)
                     assert request(f"/api/projects/{p['id']}/wip")["total"] == restored["total"]
                     same_doc = request(f"/api/projects/{p['id']}/pbd", body)

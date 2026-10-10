@@ -8,7 +8,7 @@ W-06,PARTIAL,Single-line confirmed adjustment UI/API; bulk and browser acceptanc
 W-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 W-08,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 W-09,PARTIAL,Aged WIP finding basic
-W-10,PARTIAL,Committed event metadata and reconstructed history; immutable source snapshots pending
+W-10,PARTIAL,New events save immutable allocation snapshots; external audit and browser acceptance pending
 A-01,PARTIAL,Simplified threshold question - needs rule reconciliation
 A-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 A-03,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests

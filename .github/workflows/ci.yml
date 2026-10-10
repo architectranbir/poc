@@ -9,6 +9,17 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ledgerpilot
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: ledgerpilot_tests
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ledgerpilot -d ledgerpilot_tests"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -25,6 +36,9 @@ jobs:
       - run: dotnet restore LedgerPilot.slnx --locked-mode -m:1
       - run: dotnet build LedgerPilot.slnx -c Release --no-restore -m:1
       - run: dotnet test tests/LedgerPilot.Domain.Tests -c Release --no-build --logger "trx;LogFileName=domain.trx" --results-directory artifacts/tests
+      - run: dotnet test tests/LedgerPilot.Persistence.Tests -c Release --no-build --logger "trx;LogFileName=persistence.trx" --results-directory artifacts/tests
+        env:
+          POSTGRES_TEST_CONNECTION: Host=localhost;Username=ledgerpilot;Password=local-test-only;Database=ledgerpilot_tests
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - run: python3 scripts/smoke-local.py
       - run: python3 scripts/smoke-simulator.py

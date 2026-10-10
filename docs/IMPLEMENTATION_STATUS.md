@@ -85,3 +85,8 @@ The API preview reads a server-side synthetic schedule; callers supply only cuto
 React displays source WIP rows with remaining allocation, and provides explicit line/action/partial-amount/reason confirmation. Unchanged retries retain a stable command ID. Successful commands refresh WIP/history and clear displayed draft, review and commercial preview. The history API enforces project read authorization in Entra mode and exposes committed event metadata plus reconstructed before/after allocations.
 
 Smoke verifies one history entry after duplicate delivery and preserved actor/reason/timestamp across restart. .NET/React builds pass. Browser interaction and bulk-adjustment tests remain pending. Before/after allocations are reconstructed from current source, not immutable source-version snapshots; W-10 is therefore partial. History is not a tamper-proof external audit store.
+
+## Immutable adjustment allocations
+New adjustment commands now save their before/after LineAllocation snapshots and a source-position hash in the same local JSON commit as the event. Failed saves restore both event and audit collections. History returns the stored snapshot for new events; legacy events without snapshots retain an explicitly labelled reconstructed projection.
+
+Compiled smoke changes an isolated source rate/amount after an adjustment and verifies unchanged saved audit data, then verifies the complete entry is identical after restart. Release build and smoke pass. This is immutable by application command semantics, not a tamper-proof/WORM store; authenticated browser tests, external audit retention and full source revision storage remain pending.

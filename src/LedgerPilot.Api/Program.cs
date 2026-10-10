@@ -231,10 +231,11 @@ class BillingEngine{
  return f;}
  public string Hash(string project,decimal amount,string narrative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{amount:F2}|{narrative}"))).ToLowerInvariant();
 }
-record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys,Dictionary<string,StateApproval>? FinanceApprovals=null,Dictionary<string,List<WriteUpEvent>>? WriteUps=null);
+record AdjustmentAudit(string ProjectId,string EventId,string LineId,string Action,decimal Amount,string Actor,string Reason,DateTimeOffset At,LineAllocation Before,LineAllocation After,string SourceHash,string Provenance);
+record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys,Dictionary<string,StateApproval>? FinanceApprovals=null,Dictionary<string,List<WriteUpEvent>>? WriteUps=null,Dictionary<string,List<AdjustmentAudit>>? AdjustmentAudits=null);
 class BillingStore : IDisposable{
  readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly Dictionary<string,List<AdjustmentEvent>> adjustments=new(); readonly object adjustmentLock=new();
- readonly Dictionary<string,List<WriteUpEvent>> writeUps=new(); readonly Dictionary<string,StateApproval> financeApprovals=new(); readonly string stateFile; readonly FileStream processLock;
+ readonly Dictionary<string,List<AdjustmentAudit>> adjustmentAudits=new(); readonly Dictionary<string,List<WriteUpEvent>> writeUps=new(); readonly Dictionary<string,StateApproval> financeApprovals=new(); readonly string stateFile; readonly FileStream processLock;
  public BillingStore(IConfiguration c){cfg=c;
  stateFile=Path.GetFullPath(c["STATE_PATH"] ?? Path.Combine(AppContext.BaseDirectory,"local-state","billing.json"));
  Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
@@ -242,6 +243,7 @@ class BillingStore : IDisposable{
  if(File.Exists(stateFile)){
  var saved=JsonSerializer.Deserialize<LocalBillingState>(File.ReadAllText(stateFile)) ?? throw new InvalidDataException("Empty billing state.");
  if(saved.Schema!=1)throw new InvalidDataException("Unsupported billing state schema.");
+ foreach(var item in saved.AdjustmentAudits ?? [])adjustmentAudits[item.Key]=item.Value;
  foreach(var item in saved.WriteUps ?? [])writeUps[item.Key]=item.Value;
  foreach(var item in saved.FinanceApprovals ?? [])financeApprovals[item.Key]=item.Value;
  foreach(var item in saved.Adjustments)adjustments.Add(item.Key,item.Value);
@@ -264,7 +266,7 @@ class BillingStore : IDisposable{
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
  public void Dispose(){processLock.Dispose();}
  void SaveLocal(){
- var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value),financeApprovals,writeUps);
+ var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value),financeApprovals,writeUps,adjustmentAudits);
  var temporary=stateFile+".tmp";
  using(var stream=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){
  JsonSerializer.Serialize(stream,snapshot);stream.Flush(true);
@@ -293,6 +295,8 @@ class BillingStore : IDisposable{
  var events=adjustments.GetValueOrDefault(project) ?? [];
  var accepted=new List<AdjustmentEvent>();var history=new List<object>();
  foreach(var ev in events){
+ var stored=(adjustmentAudits.GetValueOrDefault(project) ?? []).FirstOrDefault(x=>x.EventId==ev.EventId);
+ if(stored is not null){history.Add(stored);accepted.Add(ev);continue;}
  var before=BillingCalculations.Replay(Source(lines),accepted).Lines.First(x=>x.LineId==ev.LineId);
  accepted.Add(ev);
  var after=BillingCalculations.Replay(Source(lines),accepted).Lines.First(x=>x.LineId==ev.LineId);
@@ -313,8 +317,18 @@ class BillingStore : IDisposable{
  ev=new(req.EventId,req.LineId,req.Action=="POSTPONE"?AdjustmentKind.Postpone:AdjustmentKind.WriteOff,req.Amount,req.Actor,req.Reason,original?.At ?? DateTimeOffset.UtcNow);
  BillingCalculations.Replay(Source(lines),existing.Append(ev));
  if(original is null){
- var next=existing.Append(ev).ToList();adjustments[project]=next;
- try{SaveLocal();}catch{if(existing.Count==0)adjustments.Remove(project);else adjustments[project]=existing;throw;}
+ var next=existing.Append(ev).ToList();
+ var before=BillingCalculations.Replay(Source(lines),existing).Lines.First(x=>x.LineId==ev.LineId);
+ var after=BillingCalculations.Replay(Source(lines),next).Lines.First(x=>x.LineId==ev.LineId);
+ var sourceHash=BillingCalculations.FinancialHash(project,BillingCalculations.Replay(Source(lines),[]));
+ var previousAudit=adjustmentAudits.GetValueOrDefault(project) ?? [];
+ adjustmentAudits[project]=previousAudit.Append(new AdjustmentAudit(project,ev.EventId,ev.LineId,ev.Kind.ToString(),ev.Amount,ev.Actor,ev.Rationale,ev.At,before,after,sourceHash,"Immutable allocation snapshot captured at command commit")).ToList();
+ adjustments[project]=next;
+ try{SaveLocal();}catch{
+ if(existing.Count==0)adjustments.Remove(project);else adjustments[project]=existing;
+ if(previousAudit.Count==0)adjustmentAudits.Remove(project);else adjustmentAudits[project]=previousAudit;
+ throw;
+ }
  }
  }
  await Task.CompletedTask;return ev;

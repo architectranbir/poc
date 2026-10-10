@@ -54,7 +54,7 @@ app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine
  if(project is null)return Results.NotFound();
  if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
- return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=BillingCalculations.FinancialHash(id,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
+ return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=e.StateHash(project,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
 });
 app.MapGet("/api/projects/{id}/commercial-preview",async(string id,BillingStore s,HttpContext context)=>{
  var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
@@ -62,11 +62,11 @@ app.MapGet("/api/projects/{id}/commercial-preview",async(string id,BillingStore 
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  var rate=p.Currency==p.BillingCurrency?1m:p.Currency=="GBP"&&p.BillingCurrency=="EUR"?1.15m:0m;
  if(rate==0)return Results.BadRequest(new {error="No synthetic exchange-rate policy for this pair"});
- var treatment=p.VatCode switch{"S20"=>VatTreatment.Standard,"E00"=>VatTreatment.Exempt,"RC"=>VatTreatment.ReverseCharge,_=>(VatTreatment)(-1)};
+ var treatment=p.VatCode switch{"S20"=>VatTreatment.Standard,"E00"=>VatTreatment.Exempt,"RC" or "R00"=>VatTreatment.ReverseCharge,_=>(VatTreatment)(-1)};
  if(!Enum.IsDefined(treatment))return Results.BadRequest(new {error="No synthetic VAT policy for this code"});
  var preview=CommercialCalculations.Preview(s.Position(id,lines).Bill,p.Currency,p.BillingCurrency,
  new ExchangeRate(p.Currency,p.BillingCurrency,rate,new DateOnly(2026,10,10),"Synthetic demo policy v1; not a live rate"),treatment,treatment==VatTreatment.Standard?.2m:0m);
- return Results.Ok(new {preview,policy="Synthetic demo policy v1; requires Finance validation",draftIntegration="Preview only; PBD still uses project currency"});
+ return Results.Ok(new {preview,policy="Synthetic demo policy v1; requires Finance validation",draftIntegration="Draft saves this currency/VAT snapshot after explicit confirmation"});
 });
 app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
@@ -96,13 +96,13 @@ app.MapPost("/api/projects/{id}/write-ups",async(string id,WriteUpRequest req,Bi
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  try{return Results.Ok(s.SaveWriteUp(id,req,lines));}catch(ArgumentException ex){return Results.BadRequest(new {error=ex.Message});}
 });
-app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprovalRequest req,BillingStore s,HttpContext context)=>{
+app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprovalRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(project is null)return Results.NotFound();
  if(!req.Confirm)return Results.BadRequest(new {error="Explicit Finance confirmation required"});
  if(string.IsNullOrWhiteSpace(project.FinanceApprover)||!string.Equals(project.FinanceApprover,req.Actor,StringComparison.OrdinalIgnoreCase))return Results.StatusCode(403);
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
- var hash=BillingCalculations.FinancialHash(id,s.Position(id,lines));
+ var hash=e.StateHash(project,s.Position(id,lines));
  if(req.StateHash!=hash)return Results.Conflict(new {error="Finance approval state is stale"});
  return Results.Ok(s.SaveFinanceApproval(id,new StateApproval(hash,req.Actor,"Finance")));
 });
@@ -117,10 +117,13 @@ app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,Billin
  var position=s.Position(id,lines);
  var pending=findings.Where(f=>f.Severity=="CONFIRM" && !(req.Acknowledgements ?? []).Any(a=>a.FindingId==f.Id && a.DependencyHash==f.DependencyHash)).ToArray();
  if(pending.Length>0)return Results.BadRequest(new {error="Current finding acknowledgements required",findings=pending});
- var financialHash=BillingCalculations.FinancialHash(id,position);
+ var financialHash=e.StateHash(p,position);
  if(BillingCalculations.NeedsFinanceApproval(p.Unit,position.WriteOff,position.WriteUp)&&!s.HasFinanceApproval(id,financialHash))return Results.BadRequest(new {error="Current-state Finance approval required"});
- var amount=position.Bill;var hash=BillingCalculations.FinancialHash(id,position);
- var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey,req.Acknowledgements ?? []);
+ if(!req.VatConfirmed)return Results.BadRequest(new {error="Explicit VAT confirmation required"});
+ if(p.Currency!=p.BillingCurrency&&!req.CurrencyConfirmed)return Results.BadRequest(new {error="Explicit alternate-currency confirmation required"});
+ var commercial=e.Commercial(p,position);
+ var amount=commercial.BillingNet;var hash=e.StateHash(p,position,req.Narrative);
+ var doc=await s.CreatePbd(id,amount,p.BillingCurrency,hash,req.Actor,req.IdempotencyKey,req.Acknowledgements ?? [],commercial,req.Narrative);
  return Results.Ok(doc);
 });
 app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s,HttpContext context)=>{
@@ -129,17 +132,18 @@ app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s,HttpContext cont
  if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
  return Results.Ok(doc);
 });
-app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s,HttpContext context)=>{
+app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var doc=await s.GetPbd(pbdId);if(doc is null)return Results.NotFound();
  if(!req.Confirm||string.IsNullOrEmpty(req.Actor)||req.StateHash!=doc.StateHash||req.Version!=doc.Version)return Results.Conflict(new {error="Approval must match exact PBD version/state and actor"});
  var currentLines=(await s.Lines()).Where(x=>x.ProjectId==doc.ProjectId).ToList();
- if(doc.StateHash!=BillingCalculations.FinancialHash(doc.ProjectId,s.Position(doc.ProjectId,currentLines)))return Results.Conflict(new {error="Billing state changed; create and review a new draft"});
+ var currentProject=(await s.Projects()).First(p=>p.Id==doc.ProjectId);
+ if(doc.StateHash!=e.StateHash(currentProject,s.Position(doc.ProjectId,currentLines),doc.Narrative))return Results.Conflict(new {error="Billing state changed; create and review a new draft"});
  var project=(await s.Projects()).First(p=>p.Id==doc.ProjectId);
  if(!ProjectRoles.CanBill(project,req.Actor))return Results.StatusCode(403);
  return Results.Ok(await s.ApprovePbd(pbdId,req.Actor));
 });
-app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingStore s,HttpContext context)=>{
+app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit confirmation required"});
  var d=await s.GetPbd(pbdId);if(d is null)return Results.NotFound();
@@ -147,7 +151,7 @@ app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingSt
  if(!ProjectRoles.CanBill(project,req.Actor))return Results.StatusCode(403);
  if(d.Status=="POSTED")return Results.Ok(d);
  var currentLines=(await s.Lines()).Where(x=>x.ProjectId==d.ProjectId).ToList();
- if(d.StateHash!=BillingCalculations.FinancialHash(d.ProjectId,s.Position(d.ProjectId,currentLines)))return Results.Conflict(new {error="Billing state changed; approval invalidated"});
+ if(d.StateHash!=e.StateHash(project,s.Position(d.ProjectId,currentLines),d.Narrative))return Results.Conflict(new {error="Billing state changed; approval invalidated"});
  if(d.Status!="APPROVED")return Results.Conflict(new {error="PBD must be approved before posting"});
  return Results.Ok(await s.PostPbd(pbdId));
 });
@@ -185,13 +189,19 @@ record WriteUpEvent(string EventId,decimal Amount,string Actor,string Reason,Dat
 record FinanceApprovalRequest(string Actor,bool Confirm,string StateHash);
 record ReviewRequest(decimal ProposedAmount,decimal WriteOff=0,decimal WriteUp=0);
 record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm,decimal Amount=0,string? EventId=null);
-record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey,AcknowledgementInput[]? Acknowledgements=null);
+record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey,AcknowledgementInput[]? Acknowledgements=null,bool VatConfirmed=false,bool CurrencyConfirmed=false);
 record ApproveRequest(string Actor,bool Confirm,string StateHash,int Version);
 record PostRequest(string Actor,bool Confirm);
-record Pbd(string Id,string ProjectId,decimal Amount,string Currency,string Status,int Version,string StateHash,string RequestedBy,string? ApprovedBy,string? MockSapPostingId,AcknowledgementInput[]? Acknowledgements=null);
+record Pbd(string Id,string ProjectId,decimal Amount,string Currency,string Status,int Version,string StateHash,string RequestedBy,string? ApprovedBy,string? MockSapPostingId,AcknowledgementInput[]? Acknowledgements=null,CommercialPreview? Commercial=null,string Narrative="");
 record AiRequest(string UserMessage,string? ProjectId,string? Facts);
 
 class BillingEngine{
+ public CommercialPreview Commercial(Project p,FinancialPosition position){
+ var rate=p.Currency==p.BillingCurrency?1m:p.Currency=="GBP"&&p.BillingCurrency=="EUR"?1.15m:0m;
+ var treatment=p.VatCode switch{"S20"=>VatTreatment.Standard,"E00"=>VatTreatment.Exempt,"RC" or "R00"=>VatTreatment.ReverseCharge,_=>(VatTreatment)(-1)};
+ return CommercialCalculations.Preview(position.Bill,p.Currency,p.BillingCurrency,new ExchangeRate(p.Currency,p.BillingCurrency,rate,new DateOnly(2026,10,10),"Synthetic demo policy v1; not a live rate"),treatment,treatment==VatTreatment.Standard?.2m:0m);
+ }
+ public string StateHash(Project p,FinancialPosition position,string narrative="")=>Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {schema=2,financial=BillingCalculations.FinancialHash(p.Id,position),p.Id,p.Unit,p.Currency,p.BillingCurrency,p.VatCode,p.Email,p.Po,p.EndClient,p.ReceivingEngagementCode,p.Requestor,p.Manager,p.Partner,p.FinanceApprover,commercial=Commercial(p,position),narrative}))));
  public decimal Total(IEnumerable<WipLine> lines)=>BillingCalculations.Replay(lines.Select(x => new SourceLine(
    x.Id, x.Type == "Time" ? WipKind.Time : WipKind.Expense, x.Quantity, x.Rate, x.Amount)), []).Bill;
  public bool RequiresFinanceApproval(string unit,decimal writeoff,decimal writeup)=>BillingCalculations.NeedsFinanceApproval(unit,writeoff,writeup);
@@ -281,12 +291,12 @@ class BillingStore : IDisposable{
  }
  await Task.CompletedTask;return ev;
  }
- public Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key,AcknowledgementInput[] acknowledgements){
+ public Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key,AcknowledgementInput[] acknowledgements,CommercialPreview commercial,string narrative){
  if(string.IsNullOrWhiteSpace(key))throw new ArgumentException("Idempotency key required");
  lock(adjustmentLock){
  var scope=$"{project}:create:{key}";
  if(keys.TryGetValue(scope,out var existing))return Task.FromResult(pbds[existing]);
- var doc=new Pbd($"PBD-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}",project,amount,currency,"DRAFT",1,hash,actor,null,null,acknowledgements);
+ var doc=new Pbd($"PBD-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}",project,amount,currency,"DRAFT",1,hash,actor,null,null,acknowledgements,commercial,narrative);
  keys[scope]=doc.Id;pbds[doc.Id]=doc;
  try{SaveLocal();}catch{keys.TryRemove(scope,out _);pbds.TryRemove(doc.Id,out _);throw;}
  return Task.FromResult(doc);

@@ -1,0 +1,8 @@
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/__pycache__
+.git
+.env*
+**/local.settings.json

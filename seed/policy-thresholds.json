@@ -1,0 +1,14 @@
+{
+  "thresholdComparator": "STRICT_GREATER_THAN",
+  "financeBpThresholds": {
+    "Tax & Legal": 10000,
+    "Audit": 10000,
+    "Advisory": 20000
+  },
+  "accrualQuestion": {
+    "comparison": "proposed-minus-available-WIP",
+    "threshold": 10000,
+    "status": "ASSUMPTION_REQUIRES_SIGNOFF"
+  },
+  "policyVersion": "sandbox-v0.1"
+}

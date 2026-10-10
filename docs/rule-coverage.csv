@@ -1,0 +1,45 @@
+Rule ID,Implementation status,Notes
+W-01,PARTIAL,Available-WIP totals basic
+W-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-03,PARTIAL,Unplanned chargeability finding basic
+W-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-05,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-06,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-08,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-09,PARTIAL,Aged WIP finding basic
+W-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+A-01,PARTIAL,Simplified threshold question - needs rule reconciliation
+A-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+A-03,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+A-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-01,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-03,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-05,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-06,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-07,PARTIAL,Email/PO presence
+V-08,PARTIAL,Member-firm missing end client
+V-09,PARTIAL,Member-firm receiving code
+V-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-12,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-01,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-03,PARTIAL,Tax & Legal threshold check
+P-04,PARTIAL,Advisory threshold check
+P-05,PARTIAL,Audit threshold check
+P-06,PARTIAL,Strict greater-than threshold
+P-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-08,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-09,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-12,PARTIAL,Explicit draft confirmation basic
+P-13,PARTIAL,Mock PBD create basic
+P-14,PARTIAL,Mock PBD retrieval in memory
+P-15,PARTIAL,Approver role basic
+P-16,PARTIAL,Mock post after approval basic
+P-17,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-18,PARTIAL,Best-effort in-memory duplicate suppression; not durable

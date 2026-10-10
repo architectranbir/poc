@@ -12,3 +12,12 @@ artifacts/
 !.env.example
 
 local-state/
+
+# Terraform local state, plans and environment configuration
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+**/terraform.tfvars
+**/backend.hcl

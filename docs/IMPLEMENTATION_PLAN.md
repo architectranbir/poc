@@ -74,7 +74,7 @@ Keep domain code independent of storage, Foundry and workflow SDKs.
 | 3 — full UI | Scope selection, WIP tables/filter preview, bulk adjustments, validations, Finance approval, PBD preview and audit timeline | Browser journeys pass against real API |
 | 4 — simulator/workflow | Accrual/PBD/post/lookup simulator APIs, outbox/inbox, Service Bus worker, Durable human-event workflow | Duplicate delivery, lost response and worker restart yield one effect |
 | 5 — Foundry/MAF | Verified SDK integration, server-sourced facts, typed filter tools, explanations, optional narrative and summary | Live-model evaluation and injection/authorization tests pass |
-| 6 — Azure | Bicep, identities/RBAC, data store, Container Apps, Functions, Service Bus, Foundry configuration, observability and GitHub OIDC | Deployed authenticated smoke test with resource/deployment inventory |
+| 6 — Azure | Terraform, identities/RBAC, data store, Container Apps, Functions, Service Bus, Foundry configuration, observability and GitHub OIDC | Deployed authenticated smoke test with resource/deployment inventory |
 | 7 — demonstration | All-rule scenario pack, recording/script, report and team setup guide | 44/44 registry coverage plus 11/11 Step 1 checks with inspectable evidence |
 
 Milestone estimates should be set after the repository build spike, dataset inspection and Azure model quota check. No fixed completion date is justified yet.
@@ -144,7 +144,7 @@ Posting period checks from the wider requirements are also tracked beyond the 44
 - src/LedgerPilot.SapSimulator/ — synthetic SAP contracts and financial document store
 - tests/ — domain, contract, integration, workflow, authorization, AI evaluations
 - seed/ — complete versioned fixtures and expected outcomes
-- infra/ — Bicep modules, parameter examples, deploy/cleanup scripts
+- infra/ — Terraform modules, parameter examples, deploy/cleanup scripts
 - docs/ — decisions, rule manifest, demo and evidence
 - .github/workflows/ — build/test, deployment with OIDC, Azure smoke/evidence
 

@@ -38,7 +38,7 @@ resource "azurerm_federated_identity_credential" "github" {
   parent_id           = azurerm_user_assigned_identity.github.id
   audience            = ["api://AzureADTokenExchange"]
   issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:architectranbir/poc:environment:${each.key}"
+  subject             = "repo:architectranbir@286104637/poc@1412939246:environment:${each.key}"
 }
 resource "azurerm_role_assignment" "deployment" {
   scope                = "/subscriptions/${var.subscription_id}"

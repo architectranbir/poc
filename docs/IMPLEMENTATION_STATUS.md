@@ -65,3 +65,8 @@ Default and Entra-configured production builds were verified; the configured bui
 Write-up commands now validate project role, confirmation, positive amount, rationale and stable event ID. Events are saved in the local state snapshot and folded into bill/revenue figures and financial hashes. Identical retries return the existing event; conflicting reuse returns 400. Review and draft Finance checks use committed write-off/write-up values, not caller review amounts. UI retries reuse a command ID for unchanged input.
 
 API smoke verifies a £22,000 uplift, single effect on retry, invalid/unauthorized/conflicting rejection, revenue reconciliation and fresh Finance approval before draft creation. .NET and React builds pass. Real browser tests, restart-specific write-up test and Azure transactional storage remain pending. Currency/VAT/fixed-price rules and authenticated external demonstration are not complete.
+
+## Currency/VAT calculation preview
+Pure decimal calculations now validate FX pair/source/positive rate, same-currency identity rate, VAT treatment/rate and nonnegative net. Converted net and VAT are rounded under the documented money policy; gross reconciles as net plus VAT. Twelve tests cover standard/exempt/reverse-charge, conversion, midpoint and rejected policies (36 domain tests total).
+
+The API derives net from committed state and exposes a synthetic dated rate/source and VAT preview. React displays the preview with an explicit draft-integration limitation. API/React builds and preview smoke pass. PBD currently remains project-currency net: commercial-state persistence/hash, alternate amount confirmation and VAT acknowledgement are pending. Do not mark V-02/V-04/V-05/V-12 complete from preview helpers alone.

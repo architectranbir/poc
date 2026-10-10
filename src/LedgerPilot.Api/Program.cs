@@ -56,6 +56,18 @@ app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=BillingCalculations.FinancialHash(id,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
 });
+app.MapGet("/api/projects/{id}/commercial-preview",async(string id,BillingStore s,HttpContext context)=>{
+ var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
+ var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
+ var rate=p.Currency==p.BillingCurrency?1m:p.Currency=="GBP"&&p.BillingCurrency=="EUR"?1.15m:0m;
+ if(rate==0)return Results.BadRequest(new {error="No synthetic exchange-rate policy for this pair"});
+ var treatment=p.VatCode switch{"S20"=>VatTreatment.Standard,"E00"=>VatTreatment.Exempt,"RC"=>VatTreatment.ReverseCharge,_=>(VatTreatment)(-1)};
+ if(!Enum.IsDefined(treatment))return Results.BadRequest(new {error="No synthetic VAT policy for this code"});
+ var preview=CommercialCalculations.Preview(s.Position(id,lines).Bill,p.Currency,p.BillingCurrency,
+ new ExchangeRate(p.Currency,p.BillingCurrency,rate,new DateOnly(2026,10,10),"Synthetic demo policy v1; not a live rate"),treatment,treatment==VatTreatment.Standard?.2m:0m);
+ return Results.Ok(new {preview,policy="Synthetic demo policy v1; requires Finance validation",draftIntegration="Preview only; PBD still uses project currency"});
+});
 app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();

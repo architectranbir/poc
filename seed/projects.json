@@ -13,7 +13,8 @@
     "partner": "Margaret",
     "billingType": "External",
     "endClient": "",
-    "receivingEngagementCode": ""
+    "receivingEngagementCode": "",
+    "financeApprover": "DemoFinance"
   },
   {
     "id": "CU47160933P01",
@@ -29,7 +30,8 @@
     "partner": "Mina",
     "billingType": "MemberFirm",
     "endClient": "",
-    "receivingEngagementCode": ""
+    "receivingEngagementCode": "",
+    "financeApprover": "DemoFinance"
   },
   {
     "id": "CU20871144P01",
@@ -45,7 +47,8 @@
     "partner": "Margaret",
     "billingType": "MemberFirm",
     "endClient": "Helios Retail Deutschland GmbH",
-    "receivingEngagementCode": "DE-ADV-889210"
+    "receivingEngagementCode": "DE-ADV-889210",
+    "financeApprover": "DemoFinance"
   },
   {
     "id": "CU33924501P01",
@@ -61,7 +64,8 @@
     "partner": "Margaret",
     "billingType": "External",
     "endClient": "",
-    "receivingEngagementCode": ""
+    "receivingEngagementCode": "",
+    "financeApprover": "DemoFinance"
   },
   {
     "id": "CU58203677P01",
@@ -77,6 +81,7 @@
     "partner": "Margaret",
     "billingType": "External",
     "endClient": "",
-    "receivingEngagementCode": ""
+    "receivingEngagementCode": "",
+    "financeApprover": "DemoFinance"
   }
 ]

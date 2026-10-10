@@ -129,6 +129,33 @@ def run():
                     same_post = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
                     assert same_post["mockSapPostingId"] == posted["mockSapPostingId"]
                     request(f"/api/pbd/{fresh['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
+                    threshold = 20000 if p["unit"] == "Advisory" else 10000
+                    remaining = threshold - restored["position"]["writeOff"]
+                    assert remaining > 0
+                    # Use a different line to avoid allocations already consumed above.
+                    for line in snapshot["lines"][1:]:
+                        source = line["quantity"] * line["rate"] if line["type"] == "Time" else line["amount"]
+                        amount = min(remaining, source)
+                        if amount > 0:
+                            request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, lineId=line["id"], amount=amount, eventId="finance-" + line["id"]))
+                            remaining -= amount
+                        if remaining == 0:
+                            break
+                    assert remaining == 0, "Finance fixture needs enough WIP"
+                    at_boundary = request(f"/api/projects/{p['id']}/wip")
+                    assert not at_boundary["financeRequired"]
+                    request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="finance-above", amount=0.01))
+                    above = request(f"/api/projects/{p['id']}/wip")
+                    assert above["financeRequired"]
+                    finance_body = dict(body, idempotencyKey="finance-draft")
+                    request(f"/api/projects/{p['id']}/pbd", finance_body, expected=400)
+                    finance = {"actor": p["financeApprover"], "confirm": True, "stateHash": above["financialHash"]}
+                    request(f"/api/projects/{p['id']}/finance-approval", dict(finance, actor=p["requestor"]), expected=403)
+                    request(f"/api/projects/{p['id']}/finance-approval", dict(finance, stateHash="old"), expected=409)
+                    request(f"/api/projects/{p['id']}/finance-approval", finance)
+                    request(f"/api/projects/{p['id']}/pbd", finance_body)
+                    request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="finance-stale", amount=0.01))
+                    request(f"/api/projects/{p['id']}/pbd", dict(finance_body, idempotencyKey="finance-new"), expected=400)
                     # A second process must not share the single-process store.
                     other = subprocess.run([dotnet, str(dll)], cwd=root, env=dict(env, ASPNETCORE_URLS="http://127.0.0.1:0"), capture_output=True, timeout=10)
                     assert other.returncode != 0

@@ -47,3 +47,8 @@ Compiled smoke checks cover unrelated adjustment/draft/post actors and rejected 
 W-03 confirmation findings now carry a stable line-based identity and a canonical dependency hash over line identity, person and planned chargeability. Draft creation rejects missing or stale acknowledgements and retains the accepted IDs/hashes with the draft snapshot. React exposes explicit per-finding review checkboxes and clears selection when switching projects. No automatic confirmation is submitted.
 
 Compiled API smoke requires a fixture with confirmation findings and verifies missing/stale rejection and current acceptance; React build passes. Browser interaction tests remain pending. This is the W-03 acknowledgement slice only: Finance approval, complete validator dependencies, authenticated intent receipts and all-rule submission integration remain outstanding.
+
+## Finance approval integration
+Draft creation derives Finance requirements from committed adjustments, using the strict unit-specific domain threshold. The separate Finance endpoint validates the mapped synthetic Finance actor, explicit confirmation and current financial hash. Approval is saved in the local recovery snapshot; subsequent financial edits make the old hash unusable. The React page exposes a clearly labeled demo Finance action.
+
+Compiled smoke exercises exact threshold exemption, threshold plus £0.01, missing approval, incorrect role, stale hash, successful approval/draft and invalidation after another adjustment. Release/React builds pass. This verifies the write-off API slice; write-up commands, rejection/timeout workflows, authenticated Finance identity, complete commercial hashing and browser tests remain pending. DemoFinance is a synthetic persona, not a real account.

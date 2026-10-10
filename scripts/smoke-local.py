@@ -272,6 +272,11 @@ def run():
     assert result.returncode != 0
     assert b"Local development baseline only" in result.stderr
     print("PASS: non-Development startup rejected")
+    for settings in [dict(AUTH_MODE="HostedDemo", DEMO_NETWORK_RESTRICTED="false", COMMAND_STORE_CONNECTION="required"), dict(AUTH_MODE="HostedDemo", DEMO_NETWORK_RESTRICTED="true", COMMAND_STORE_CONNECTION="")]:
+        rejected = subprocess.run([dotnet, str(dll)], cwd=root, env=dict(env, **settings), capture_output=True, timeout=10)
+        assert rejected.returncode != 0
+        assert b"Hosted demo requires explicit restricted or public synthetic access and PostgreSQL persistence" in rejected.stderr
+    print("PASS: hosted demo requires explicit access mode and persistent state")
     auth_env = dict(env, ASPNETCORE_ENVIRONMENT="Development", AUTH_MODE="Entra",
                     ENTRA_TENANT_ID="11111111-1111-1111-1111-111111111111", ENTRA_API_AUDIENCE="api://ledgerpilot-test")
     Path(auth_env["STATE_PATH"]).unlink()

@@ -1,0 +1,33 @@
+name: Deploy public Azure demo
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy.yml'
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: ledgerpilot-release
+  cancel-in-progress: false
+jobs:
+  infrastructure:
+    uses: ./.github/workflows/terraform.yml
+    with:
+      action: apply
+      runtime_platform: true
+      workloads: false
+    secrets: inherit
+  images:
+    needs: infrastructure
+    uses: ./.github/workflows/images.yml
+  application:
+    needs: images
+    uses: ./.github/workflows/terraform.yml
+    with:
+      action: apply
+      runtime_platform: true
+      workloads: true
+      image_tag: ${{ github.sha }}
+    secrets: inherit

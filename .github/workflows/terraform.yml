@@ -1,5 +1,22 @@
 name: Terraform Azure foundation
 on:
+  workflow_call:
+    inputs:
+      action:
+        type: string
+        default: plan
+      runtime_platform:
+        type: boolean
+        default: false
+      workloads:
+        type: boolean
+        default: false
+      image_tag:
+        type: string
+        default: ""
+    secrets:
+      POSTGRES_ADMIN_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       action:
@@ -11,6 +28,14 @@ on:
         description: Include private PostgreSQL, ACR and Container Apps environment
         type: boolean
         default: false
+      workloads:
+        description: Deploy the published demo, SAP worker, dispatcher and Durable containers
+        type: boolean
+        default: false
+      image_tag:
+        description: Published image commit SHA
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -19,17 +44,21 @@ concurrency:
 env:
   ARM_USE_OIDC: 'true'
   ARM_USE_AZUREAD: 'true'
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
-  TF_VAR_location: southindia
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+  TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX || '7dde6178' }}
+  TF_VAR_location: ${{ vars.AZURE_REGION || 'southindia' }}
+  TF_VAR_enable_workloads: ${{ inputs.workloads }}
+  TF_VAR_image_tag: ${{ inputs.image_tag }}
+  TF_VAR_demo_public_access: ${{ vars.DEMO_PUBLIC_ACCESS || 'true' }}
+  TF_VAR_demo_allowed_ipv4_cidrs: ${{ vars.DEMO_ALLOWED_IPV4_CIDRS || '[]' }}
   TF_VAR_enable_runtime_platform: ${{ inputs.runtime_platform }}
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_IN_AUTOMATION: 'true'
-  STATE_RG: ${{ vars.TF_STATE_RG }}
-  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
-  STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+  STATE_RG: ${{ vars.TF_STATE_RG || 'rg-ledgerpilot-7dde6178-bootstrap' }}
+  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT || 'stlptf7dde6178' }}
+  STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER || 'tfstate' }}
 jobs:
   plan:
     if: github.ref == 'refs/heads/main'
@@ -61,11 +90,17 @@ jobs:
           -backend-config="key=ledgerpilot/poc.tfstate"
       - run: terraform validate
       - run: terraform plan -input=false -lock-timeout=5m -out=tfplan
-      - uses: actions/upload-artifact@v4
+      - uses: azure/login@v2
         with:
-          name: terraform-plan-${{ github.sha }}
-          path: infra/terraform/tfplan
-          retention-days: 1
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+      - name: Store plan in private Azure state storage
+        run: >-
+          az storage blob upload --auth-mode login --only-show-errors
+          --account-name "$STATE_ACCOUNT" --container-name "$STATE_CONTAINER"
+          --name "plans/$GITHUB_RUN_ID-${{ inputs.workloads }}.tfplan"
+          --file tfplan --overwrite true
   apply:
     if: inputs.action == 'apply'
     needs: plan
@@ -82,10 +117,17 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.13.5
-      - uses: actions/download-artifact@v4
+      - uses: azure/login@v2
         with:
-          name: terraform-plan-${{ github.sha }}
-          path: infra/terraform
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+      - name: Retrieve private saved plan
+        run: >-
+          az storage blob download --auth-mode login --only-show-errors
+          --account-name "$STATE_ACCOUNT" --container-name "$STATE_CONTAINER"
+          --name "plans/$GITHUB_RUN_ID-${{ inputs.workloads }}.tfplan"
+          --file tfplan
       - name: Initialize OIDC remote state
         run: >-
           terraform init -lockfile=readonly
@@ -93,4 +135,37 @@ jobs:
           -backend-config="storage_account_name=$STATE_ACCOUNT"
           -backend-config="container_name=$STATE_CONTAINER"
           -backend-config="key=ledgerpilot/poc.tfstate"
+      - name: Release single-writer containers for replacement
+        if: inputs.workloads
+        run: |
+          group="rg-ledgerpilot-$TF_VAR_name_suffix"
+          for service in demo sap dispatcher workflows; do
+            app="ledgerpilot-$TF_VAR_name_suffix-$service"
+            if az containerapp show --resource-group "$group" --name "$app" >/dev/null 2>&1; then
+              for revision in $(az containerapp revision list --resource-group "$group" --name "$app" --query '[?properties.active].name' -o tsv); do
+                az containerapp revision deactivate --resource-group "$group" --name "$app" --revision "$revision"
+              done
+            fi
+          done
       - run: terraform apply -input=false -lock-timeout=5m tfplan
+      - name: Activate current demo revisions
+        if: always() && inputs.workloads
+        run: |
+          group="rg-ledgerpilot-$TF_VAR_name_suffix"
+          for service in demo sap dispatcher workflows; do
+            app="ledgerpilot-$TF_VAR_name_suffix-$service"
+            if az containerapp show --resource-group "$group" --name "$app" >/dev/null 2>&1; then
+              revision=$(az containerapp show --resource-group "$group" --name "$app" --query properties.latestRevisionName -o tsv)
+              az containerapp revision activate --resource-group "$group" --name "$app" --revision "$revision"
+            fi
+          done
+      - name: Verify public application
+        if: success() && inputs.workloads && env.TF_VAR_demo_public_access == 'true'
+        run: |
+          url=$(terraform output -raw demo_url)
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$url/health"
+          curl --fail --silent --show-error "$url/api/projects" > projects.json
+          python3 -c 'import json; assert len(json.load(open("projects.json"))) > 0'
+          curl --fail --silent --show-error "$url/" > index.html
+          python3 -c 'assert "id=\"root\"" in open("index.html").read()'
+          echo "Public demo: $url" >> "$GITHUB_STEP_SUMMARY"

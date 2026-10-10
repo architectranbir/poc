@@ -1,5 +1,6 @@
 name: Publish Azure runtime images
 on:
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,15 +13,15 @@ jobs:
       contents: read
       id-token: write
     env:
-      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
-      ACR_SERVER: ${{ vars.AZURE_ACR_SERVER }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'acrlp7dde6178' }}
+      ACR_SERVER: ${{ vars.AZURE_ACR_SERVER || 'acrlp7dde6178.azurecr.io' }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
       - name: Authenticate registry
         run: |
           test -n "$ACR_NAME" && test -n "$ACR_SERVER"
@@ -34,15 +35,7 @@ jobs:
           done
           docker build -f containers/Dockerfile.workflows -t "$ACR_SERVER/ledgerpilot-workflows:$GITHUB_SHA" .
           docker push "$ACR_SERVER/ledgerpilot-workflows:$GITHUB_SHA"
-      - name: Publish authenticated React image
-        env:
-          VITE_ENTRA_CLIENT_ID: ${{ vars.ENTRA_WEB_CLIENT_ID }}
-          VITE_ENTRA_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          VITE_ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE }}
-          VITE_API_URL: ${{ vars.API_PUBLIC_URL }}
+      - name: Publish demo application without Entra sign-in
         run: |
-          for name in VITE_ENTRA_CLIENT_ID VITE_ENTRA_TENANT_ID VITE_ENTRA_API_SCOPE VITE_API_URL; do
-            test -n "${!name}" || exit 1
-          done
-          docker build -f containers/Dockerfile.web --target production --build-arg VITE_ENTRA_CLIENT_ID --build-arg VITE_ENTRA_TENANT_ID --build-arg VITE_ENTRA_API_SCOPE --build-arg VITE_API_URL -t "$ACR_SERVER/ledgerpilot-web:$GITHUB_SHA" .
-          docker push "$ACR_SERVER/ledgerpilot-web:$GITHUB_SHA"
+          docker build -f containers/Dockerfile.demo -t "$ACR_SERVER/ledgerpilot-demo:$GITHUB_SHA" .
+          docker push "$ACR_SERVER/ledgerpilot-demo:$GITHUB_SHA"

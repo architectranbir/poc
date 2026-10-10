@@ -7,8 +7,8 @@ variable "postgres_admin_password" {
   sensitive = true
   default   = ""
   validation {
-    condition     = !var.enable_runtime_platform || length(var.postgres_admin_password) >= 20
-    error_message = "Runtime platform requires a PostgreSQL password of at least 20 characters."
+    condition     = !var.enable_runtime_platform || can(regex("^[A-Za-z0-9!@#$%^&*()_+=.-]{20,}$", var.postgres_admin_password))
+    error_message = "Runtime platform requires a PostgreSQL password of at least 20 letters, digits or supported symbols (!@#$%^&*()_+=.-)."
   }
 }
 resource "azurerm_container_registry" "runtime" {

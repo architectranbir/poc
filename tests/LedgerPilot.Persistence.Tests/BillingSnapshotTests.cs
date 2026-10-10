@@ -31,3 +31,21 @@ public sealed class BillingSnapshotTests
         await cleanup.ExecuteNonQueryAsync();
     }
 }
+
+[Collection("Database")]
+public sealed class SimulatorSnapshotTests
+{
+    [Fact]
+    public void SimulatorAndBillingHaveIndependentWriterLocksAndRecoverSnapshots()
+    {
+        var connection=Environment.GetEnvironmentVariable("POSTGRES_TEST_CONNECTION")!;
+        var expected="simulator-"+Guid.NewGuid();
+        using(var billing=new BillingSnapshotStore(connection))
+        using(var simulator=new SimulatorSnapshotStore(connection)){
+            simulator.Load();simulator.Save(expected);
+            Assert.Throws<InvalidOperationException>(()=>new SimulatorSnapshotStore(connection));
+            Assert.Equal(expected,simulator.Load());
+        }
+        using(var recovered=new SimulatorSnapshotStore(connection))Assert.Equal(expected,recovered.Load());
+    }
+}

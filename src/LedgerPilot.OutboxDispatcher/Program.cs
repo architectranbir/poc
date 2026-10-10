@@ -4,7 +4,7 @@ using LedgerPilot.Persistence;
 using Npgsql;
 using System.Text.Json;
 
-if (Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") != "Development")
+if (Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") != "Development" && Environment.GetEnvironmentVariable("SYNTHETIC_HOSTED_DEMO") != "true")
     throw new InvalidOperationException("Dispatcher is restricted to Development until deployment hardening is complete.");
 await using var source = NpgsqlDataSource.Create(Environment.GetEnvironmentVariable("COMMAND_STORE_CONNECTION")
     ?? throw new InvalidOperationException("COMMAND_STORE_CONNECTION required."));

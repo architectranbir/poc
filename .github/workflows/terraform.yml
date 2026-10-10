@@ -90,11 +90,17 @@ jobs:
           -backend-config="key=ledgerpilot/poc.tfstate"
       - run: terraform validate
       - run: terraform plan -input=false -lock-timeout=5m -out=tfplan
-      - uses: actions/upload-artifact@v4
+      - uses: azure/login@v2
         with:
-          name: terraform-plan-${{ github.sha }}-${{ inputs.workloads }}
-          path: infra/terraform/tfplan
-          retention-days: 1
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+      - name: Store plan in private Azure state storage
+        run: >-
+          az storage blob upload --auth-mode login --only-show-errors
+          --account-name "$STATE_ACCOUNT" --container-name "$STATE_CONTAINER"
+          --name "plans/$GITHUB_RUN_ID-${{ inputs.workloads }}.tfplan"
+          --file tfplan --overwrite true
   apply:
     if: inputs.action == 'apply'
     needs: plan
@@ -111,10 +117,17 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.13.5
-      - uses: actions/download-artifact@v4
+      - uses: azure/login@v2
         with:
-          name: terraform-plan-${{ github.sha }}-${{ inputs.workloads }}
-          path: infra/terraform
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+      - name: Retrieve private saved plan
+        run: >-
+          az storage blob download --auth-mode login --only-show-errors
+          --account-name "$STATE_ACCOUNT" --container-name "$STATE_CONTAINER"
+          --name "plans/$GITHUB_RUN_ID-${{ inputs.workloads }}.tfplan"
+          --file tfplan
       - name: Initialize OIDC remote state
         run: >-
           terraform init -lockfile=readonly
@@ -122,11 +135,6 @@ jobs:
           -backend-config="storage_account_name=$STATE_ACCOUNT"
           -backend-config="container_name=$STATE_CONTAINER"
           -backend-config="key=ledgerpilot/poc.tfstate"
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
       - name: Release single-writer containers for replacement
         if: inputs.workloads
         run: |
@@ -151,3 +159,13 @@ jobs:
               az containerapp revision activate --resource-group "$group" --name "$app" --revision "$revision"
             fi
           done
+      - name: Verify public application
+        if: success() && inputs.workloads && env.TF_VAR_demo_public_access == 'true'
+        run: |
+          url=$(terraform output -raw demo_url)
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$url/health"
+          curl --fail --silent --show-error "$url/api/projects" > projects.json
+          python3 -c 'import json; assert len(json.load(open("projects.json"))) > 0'
+          curl --fail --silent --show-error "$url/" > index.html
+          python3 -c 'assert "id=\"root\"" in open("index.html").read()'
+          echo "Public demo: $url" >> "$GITHUB_STEP_SUMMARY"

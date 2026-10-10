@@ -100,3 +100,6 @@ Release build and concurrent/restart smoke pass. This is a local trusted-command
 A separate one-pass .NET worker consumes local command files and calls the separate simulator over HTTP. It persists content-bound receipts and reconciles creates by external key and posts by document/state/post-command key. Fault injection commits source state then returns HTTP 503; a fresh worker process recovers the same effect. Build and HTTP fault/restart tests pass.
 
 This establishes the process/contract boundary only. Billing API publication, transactional outbox/inbox, Service Bus consumer, Durable orchestration, service authentication and dead-letter policy remain pending. No live SAP/Service Bus action has been executed.
+
+## Service Bus worker transport (compiled)
+Worker now includes explicit-settlement Service Bus processing using managed/developer identity, canonical command persistence, receipt-before-completion, retry abandonment and invalid-envelope dead-letter handling. SDK versions are locked. Release build and shared local fault/restart tests pass. Live queue settlement, distributed inbox/storage, hosting identity and Durable orchestration remain unverified/pending.

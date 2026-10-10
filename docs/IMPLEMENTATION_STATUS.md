@@ -115,3 +115,7 @@ Added a Development-only Service Bus outbox dispatcher using managed-identity-co
 ## PostgreSQL API and atomic posting command acceptance
 
 API PostgreSQL mode persists the billing snapshot and atomically queues confirmed posting with its outbox record. Posting stays POST_PENDING until the separate worker's persistent SAP receipt is reconciled. Worker CreateAndPost recovers lost create and post responses. React includes posting-status refresh. Added PostgreSQL transaction rollback/restart/single-writer tests and API-to-worker smoke in CI. Local JSON mode remains isolated; existing JSON is not imported. Single API writer only; master data still seed/blob. Live queue, Durable Functions, Azure deployment and complete 44-rule demonstration remain pending.
+
+## PostgreSQL worker inbox ownership
+
+Added token-bound, database-clock inbox leases and fenced receipt commits. Worker execution is bounded to 45 seconds within a 120-second lease; failed attempts release ownership and crashes recover by expiry. Concurrent claim, expiry takeover and stale-owner rejection tests added. Local Release build and simulator smoke passed. This is not exactly-once external SAP execution: command-key reconciliation remains required. API remains single writer; live queue timing/backoff, Durable Functions, cloud deployment and full rule coverage remain pending.

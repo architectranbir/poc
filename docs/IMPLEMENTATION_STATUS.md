@@ -103,3 +103,7 @@ This establishes the process/contract boundary only. Billing API publication, tr
 
 ## Service Bus worker transport (compiled)
 Worker now includes explicit-settlement Service Bus processing using managed/developer identity, canonical command persistence, receipt-before-completion, retry abandonment and invalid-envelope dead-letter handling. SDK versions are locked. Release build and shared local fault/restart tests pass. Live queue settlement, distributed inbox/storage, hosting identity and Durable orchestration remain unverified/pending.
+
+## PostgreSQL command store foundation
+
+Added a separate Npgsql command store with transactional command/outbox acceptance, conflicting-key protection, concurrent publisher row locks and durable idempotent result receipts. Added real PostgreSQL integration tests and a PostgreSQL 17 CI service. Release compilation passes locally; local PostgreSQL runtime unavailable. This is a library foundation, not an API/worker cutover: JSON billing state, file worker receipts, transactional billing transitions, execution inbox leases and Azure deployment remain pending. See POSTGRES_COMMAND_STORE.md.

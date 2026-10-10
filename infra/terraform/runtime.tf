@@ -95,6 +95,9 @@ resource "azurerm_postgresql_flexible_server" "runtime" {
   private_dns_zone_id           = azurerm_private_dns_zone.postgres[0].id
   depends_on                    = [azurerm_private_dns_zone_virtual_network_link.postgres]
   tags                          = local.tags
+  lifecycle {
+    ignore_changes = [zone]
+  }
 }
 resource "azurerm_postgresql_flexible_server_database" "runtime" {
   count     = var.enable_runtime_platform ? 1 : 0

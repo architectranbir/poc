@@ -10,3 +10,5 @@ local.settings.json
 artifacts/
 .env.*
 !.env.example
+
+local-state/

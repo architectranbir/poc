@@ -72,29 +72,58 @@ with tempfile.TemporaryDirectory(prefix='ledgerpilot-sap-') as state:
                     worker_dll = root / 'src/LedgerPilot.SapWorker/bin/Release/net10.0/LedgerPilot.SapWorker.dll'
                     worker_env = dict(env, DOTNET_ENVIRONMENT='Development', SAP_SIMULATOR_URL=base, SAP_COMMAND_PATH=str(spool), SIMULATE_RESPONSE_LOSS='true')
                     create_path = spool / '01.command.json'
-                    worker_create = {'operation': 'Create', 'commandKey': 'worker-create', 'projectId': 'WORKER-1', 'net': 900, 'currency': 'GBP', 'stateHash': 'worker-state'}
+                    database_mode = bool(os.environ.get('COMMAND_STORE_CONNECTION'))
+                    dispatcher_dll = root / 'src/LedgerPilot.OutboxDispatcher/bin/Release/net10.0/LedgerPilot.OutboxDispatcher.dll'
+                    def database(*args):
+                        result = subprocess.run([dotnet, str(dispatcher_dll), *args], env=worker_env, capture_output=True, timeout=20)
+                        assert result.returncode == 0, result.stderr
+                        return result.stdout.strip()
+                    if database_mode:
+                        database('--initialize')
+                    worker_create = {'operation': 'Create', 'commandKey': 'worker-create-' + str(port), 'projectId': 'WORKER-1', 'net': 900, 'currency': 'GBP', 'stateHash': 'worker-state'}
                     create_path.write_text(json.dumps(worker_create))
                     def worker(expected):
                         result = subprocess.run([dotnet, str(worker_dll)], env=worker_env, capture_output=True, timeout=20)
                         assert result.returncode == expected, result.stderr
+                    if database_mode:
+                        database('--enqueue', str(create_path))
                     worker(1)  # Source committed but returned a simulated lost response.
                     assert not Path(str(create_path) + '.result.json').exists()
-                    source_doc = request('/commands/worker-create')
+                    source_doc = request('/commands/' + worker_create['commandKey'])
                     worker(0)  # Fresh process reconciles instead of creating another document.
                     create_result_path = Path(str(create_path) + '.result.json')
-                    receipt = json.loads(create_result_path.read_text())
+                    receipt = {'Response': json.loads(database('--receipt', worker_create['commandKey']))} if database_mode else json.loads(create_result_path.read_text())
+                    if database_mode:
+                        assert not create_result_path.exists()
                     assert receipt['Response']['id'] == source_doc['id']
                     post_command_path = spool / '02.command.json'
-                    post_command_path.write_text(json.dumps(dict(worker_create, operation='Post', commandKey='worker-post', documentId=source_doc['id'])))
+                    post_key = 'worker-post-' + str(port)
+                    post_command_path.write_text(json.dumps(dict(worker_create, operation='Post', commandKey=post_key, documentId=source_doc['id'])))
+                    if database_mode:
+                        database('--enqueue', str(post_command_path))
                     worker(1)
                     posted_source = request(f"/documents/{source_doc['id']}")
                     assert posted_source['status'] == 'POSTED'
                     worker(0)
                     post_receipt_path = Path(str(post_command_path) + '.result.json')
-                    post_receipt = post_receipt_path.read_text()
+                    post_receipt = json.dumps({'Response': json.loads(database('--receipt', post_key))}) if database_mode else post_receipt_path.read_text()
                     assert json.loads(post_receipt)['Response']['postingReference'] == posted_source['postingReference']
                     worker(0)
-                    assert post_receipt_path.read_text() == post_receipt
+                    if database_mode:
+                        assert not post_receipt_path.exists()
+                        assert json.dumps({'Response': json.loads(database('--receipt', post_key))}) == post_receipt
+                        # Lost spool and fresh process still use the database receipt.
+                        create_path.unlink()
+                        post_command_path.unlink()
+                        replacement = spool / '03.command.json'
+                        replacement.write_text(json.dumps(dict(worker_create, operation='Post', commandKey=post_key, documentId=source_doc['id'])))
+                        worker(0)
+                        assert not Path(str(replacement) + '.result.json').exists()
+                        replacement.write_text(json.dumps(dict(worker_create, operation='Post', commandKey=post_key, documentId=source_doc['id'], net=901)))
+                        result = subprocess.run([dotnet, str(worker_dll)], env=worker_env, capture_output=True, timeout=20)
+                        assert result.returncode != 0, 'changed accepted command must fail'
+                    else:
+                        assert post_receipt_path.read_text() == post_receipt
                     print('PASS: worker lost-response reconciliation and durable receipts')
             finally:
                 api.terminate()

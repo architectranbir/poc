@@ -16,3 +16,22 @@ Set SAP_TRANSPORT=ServiceBus, SERVICEBUS_NAMESPACE to the fully qualified namesp
 The processor uses one concurrent handler, explicit settlement and five-minute automatic lock renewal. MessageId must match CommandKey. It saves the canonical command to local spool, processes/reconciles it and completes only after a durable receipt exists. HTTP failure abandons for retry; malformed/changed/invalid command data is dead-lettered. Server-side max delivery count is configured by Terraform. SDK/IO failures are not completed automatically.
 
 The branch compiles and the shared local reconciliation tests pass. No live queue receive/complete/abandon/dead-letter or lock-expiry test has run. Development-only worker and loopback simulator restrictions remain. A shared PostgreSQL inbox/receipt store must replace local spool before distributed replicas; Container Apps/identity deployment remains pending. Source reference: https://learn.microsoft.com/en-us/dotnet/api/overview/azure/messaging.servicebus-readme
+
+## PostgreSQL receipts and outbox dispatcher
+
+Set `COMMAND_STORE_CONNECTION` on the worker to use PostgreSQL receipts. Service Bus mode now requires this setting. Each received command must match an existing accepted canonical payload; unknown or changed commands are rejected. Results are saved in PostgreSQL before completing the Service Bus message. Local file receipt mode remains available for isolated offline smoke tests.
+
+`LedgerPilot.OutboxDispatcher` publishes PostgreSQL outbox entries to `SERVICEBUS_NAMESPACE` / `SERVICEBUS_QUEUE` using DefaultAzureCredential. MessageId is the immutable command key. Each dispatch attempt has a 30-second deadline; failed sends leave entries pending. Broker acceptance followed by a database commit failure can cause duplicate delivery, so SAP reconciliation remains necessary.
+
+Development-only helpers (not approval endpoints):
+
+```sh
+dotnet run --project src/LedgerPilot.OutboxDispatcher -- --initialize
+dotnet run --project src/LedgerPilot.OutboxDispatcher -- --enqueue command.json
+dotnet run --project src/LedgerPilot.OutboxDispatcher -- --receipt COMMAND_KEY
+dotnet run --project src/LedgerPilot.OutboxDispatcher
+```
+
+All require `DOTNET_ENVIRONMENT=Development` and a dedicated `COMMAND_STORE_CONNECTION`. Enqueue accepts synthetic test commands only through an explicit local CLI action. Do not expose these helpers as HTTP endpoints. Schema bootstrap should be replaced with deployment migrations.
+
+The PostgreSQL smoke run tests lost-response create/post recovery, process restart, absence of file receipts, spool replacement and changed accepted-command rejection. GitHub CI runs it against PostgreSQL 17. Actual Azure queue delivery, distributed inbox execution leases, API approval-to-command transaction, hosted deployments and real SAP sandbox integration remain pending. Worker spool locking only protects one filesystem directory; this is not a distributed execution lock.

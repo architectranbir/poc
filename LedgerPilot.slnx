@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/LedgerPilot.OutboxDispatcher/LedgerPilot.OutboxDispatcher.csproj" />
     <Project Path="src/LedgerPilot.Api/LedgerPilot.Api.csproj" />
     <Project Path="src/LedgerPilot.Persistence/LedgerPilot.Persistence.csproj" />
     <Project Path="src/LedgerPilot.Domain/LedgerPilot.Domain.csproj" />

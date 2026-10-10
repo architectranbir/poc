@@ -107,3 +107,7 @@ Worker now includes explicit-settlement Service Bus processing using managed/dev
 ## PostgreSQL command store foundation
 
 Added a separate Npgsql command store with transactional command/outbox acceptance, conflicting-key protection, concurrent publisher row locks and durable idempotent result receipts. Added real PostgreSQL integration tests and a PostgreSQL 17 CI service. Release compilation passes locally; local PostgreSQL runtime unavailable. This is a library foundation, not an API/worker cutover: JSON billing state, file worker receipts, transactional billing transitions, execution inbox leases and Azure deployment remain pending. See POSTGRES_COMMAND_STORE.md.
+
+## Outbox publisher and PostgreSQL worker receipt integration
+
+Added a Development-only Service Bus outbox dispatcher using managed-identity-compatible authentication, immutable message IDs and bounded dispatch attempts. SAP worker PostgreSQL mode verifies accepted payloads and persists result receipts before queue completion. Service Bus mode requires PostgreSQL. Local file transport remains for offline tests. Added a second simulator smoke run in CI against PostgreSQL, covering lost-response recovery and spool replacement. Local Release build and existing simulator smoke passed. API JSON state still needs migration and atomic approval-to-command transitions; no live Azure queue test or cloud deployment has occurred.

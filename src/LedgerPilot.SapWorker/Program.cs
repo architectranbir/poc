@@ -1,3 +1,5 @@
+using LedgerPilot.Persistence;
+using Npgsql;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using System.Net;
@@ -12,18 +14,23 @@ Directory.CreateDirectory(directory);
 using var ownership=new FileStream(Path.Combine(directory,"worker.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
 using var http=new HttpClient{BaseAddress=endpoint,Timeout=TimeSpan.FromSeconds(10)};
 var options=new JsonSerializerOptions{PropertyNameCaseInsensitive=true};
+var databaseConnection=Environment.GetEnvironmentVariable("COMMAND_STORE_CONNECTION");
+await using var database=databaseConnection is null ? null : NpgsqlDataSource.Create(databaseConnection);
+var commandStore=database is null ? null : new CommandStore(database);
 var transport=Environment.GetEnvironmentVariable("SAP_TRANSPORT") ?? "LocalFiles";
 if(transport=="LocalFiles"){
  foreach(var path in Directory.GetFiles(directory,"*.command.json").Order(StringComparer.Ordinal))
  if(!await ProcessFile(path))Environment.ExitCode=1;
 }else if(transport=="ServiceBus"){
+ if(commandStore is null)throw new InvalidOperationException("ServiceBus requires COMMAND_STORE_CONNECTION");
  var fullyQualifiedNamespace=Environment.GetEnvironmentVariable("SERVICEBUS_NAMESPACE") ?? throw new InvalidOperationException("SERVICEBUS_NAMESPACE required");
  await using var bus=new ServiceBusClient(fullyQualifiedNamespace,new DefaultAzureCredential());
  await using var processor=bus.CreateProcessor(Environment.GetEnvironmentVariable("SERVICEBUS_QUEUE")??"sap-commands",new ServiceBusProcessorOptions{AutoCompleteMessages=false,MaxConcurrentCalls=1,MaxAutoLockRenewalDuration=TimeSpan.FromMinutes(5)});
  processor.ProcessMessageAsync+=async args=>{
  try{
- var command=JsonSerializer.Deserialize<WorkerCommand>(args.Message.Body.ToString(),options)??throw new InvalidDataException("Empty command");
+ var command=JsonSerializer.Deserialize<SapCommand>(args.Message.Body.ToString(),options)??throw new InvalidDataException("Empty command");
  if(command.Operation is not ("Create" or "Post")||string.IsNullOrWhiteSpace(command.CommandKey)||command.CommandKey.Length>128||args.Message.MessageId!=command.CommandKey)throw new InvalidDataException("Invalid command envelope or MessageId");
+ command.Validate();
  var canonical=JsonSerializer.Serialize(command);
  var key=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(command.Operation+":"+command.CommandKey)));
  var path=Path.Combine(directory,key+".command.json");
@@ -44,10 +51,17 @@ if(transport=="LocalFiles"){
  await processor.StopProcessingAsync();
 }else throw new InvalidOperationException("SAP_TRANSPORT must be LocalFiles or ServiceBus");
 async Task<bool> ProcessFile(string path){
- var command=JsonSerializer.Deserialize<WorkerCommand>(await File.ReadAllTextAsync(path),options)??throw new InvalidDataException("Empty command");
+ var command=JsonSerializer.Deserialize<SapCommand>(await File.ReadAllTextAsync(path),options)??throw new InvalidDataException("Empty command");
+ command.Validate();
+ var canonical=JsonSerializer.Serialize(command);
+ if(commandStore is not null)await commandStore.VerifyAccepted(command.CommandKey,canonical);
  var hash=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command))));
  var resultPath=path+".result.json";
- if(File.Exists(resultPath)){
+ if(commandStore is not null){
+ var saved=await commandStore.Receipt(command.CommandKey);
+ if(saved is not null)return true;
+ }
+ if(commandStore is null && File.Exists(resultPath)){
  var previous=JsonSerializer.Deserialize<WorkerResult>(await File.ReadAllTextAsync(resultPath),options)!;
  if(previous.CommandHash!=hash)throw new InvalidDataException("Completed command changed");
  return true;
@@ -68,6 +82,7 @@ async Task<bool> ProcessFile(string path){
  else response=await Send($"/documents/{Uri.EscapeDataString(command.DocumentId!)}/post",new {command.CommandKey,command.StateHash});
  }else throw new InvalidDataException("Unknown operation");
  var result=new WorkerResult(hash,response,DateTimeOffset.UtcNow);
+ if(commandStore is not null){await commandStore.Complete(command.CommandKey,JsonSerializer.Serialize(response));return true;}
  using(var stream=new FileStream(resultPath+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,result);stream.Flush(true);}
  File.Move(resultPath+".tmp",resultPath,true);
  return true;
@@ -79,5 +94,4 @@ async Task<JsonElement> Send(string path,object command){
  using var response=await http.SendAsync(request);response.EnsureSuccessStatusCode();
  return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
 }
-record WorkerCommand(string Operation,string CommandKey,string ProjectId,decimal Net,string Currency,string StateHash,string? DocumentId=null);
 record WorkerResult(string CommandHash,JsonElement Response,DateTimeOffset CompletedAt);

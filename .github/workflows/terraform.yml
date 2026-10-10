@@ -27,20 +27,21 @@ concurrency:
 env:
   ARM_USE_OIDC: 'true'
   ARM_USE_AZUREAD: 'true'
-  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+  TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX || '7dde6178' }}
   TF_VAR_location: ${{ vars.AZURE_REGION || 'southindia' }}
   TF_VAR_enable_workloads: ${{ inputs.workloads }}
   TF_VAR_image_tag: ${{ inputs.image_tag }}
+  TF_VAR_demo_public_access: ${{ vars.DEMO_PUBLIC_ACCESS || 'true' }}
   TF_VAR_demo_allowed_ipv4_cidrs: ${{ vars.DEMO_ALLOWED_IPV4_CIDRS || '[]' }}
   TF_VAR_enable_runtime_platform: ${{ inputs.runtime_platform }}
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_IN_AUTOMATION: 'true'
-  STATE_RG: ${{ vars.TF_STATE_RG }}
-  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
-  STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+  STATE_RG: ${{ vars.TF_STATE_RG || 'rg-ledgerpilot-7dde6178-bootstrap' }}
+  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT || 'stlptf7dde6178' }}
+  STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER || 'tfstate' }}
 jobs:
   plan:
     if: github.ref == 'refs/heads/main'
@@ -106,9 +107,9 @@ jobs:
           -backend-config="key=ledgerpilot/poc.tfstate"
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
       - name: Release single-writer containers for replacement
         if: inputs.workloads
         run: |

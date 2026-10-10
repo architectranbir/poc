@@ -1,3 +1,7 @@
+variable "demo_public_access" {
+  type    = bool
+  default = false
+}
 variable "enable_workloads" {
   type    = bool
   default = false
@@ -16,8 +20,8 @@ variable "demo_allowed_ipv4_cidrs" {
 }
 check "workload_inputs" {
   assert {
-    condition     = !var.enable_workloads || (var.enable_runtime_platform && can(regex("^[a-f0-9]{40}$", var.image_tag)) && length(var.demo_allowed_ipv4_cidrs) > 0)
-    error_message = "Workloads require the runtime platform, a published commit image tag and restricted demo IP ranges."
+    condition     = !var.enable_workloads || (var.enable_runtime_platform && can(regex("^[a-f0-9]{40}$", var.image_tag)) && (var.demo_public_access || length(var.demo_allowed_ipv4_cidrs) > 0))
+    error_message = "Workloads require the runtime platform, a published commit image tag and explicit public synthetic access or restricted demo IP ranges."
   }
 }
 locals {
@@ -39,7 +43,7 @@ locals {
     AzureWebJobsStorage__clientId    = try(azurerm_user_assigned_identity.workload[0].client_id, "")
   }
   containers = {
-    demo = [{ name = "demo", image = "demo", env = { ASPNETCORE_ENVIRONMENT = "Production", AUTH_MODE = "HostedDemo", DEMO_NETWORK_RESTRICTED = "true" }, cpu = 0.5, memory = "1Gi" }]
+    demo = [{ name = "demo", image = "demo", env = { ASPNETCORE_ENVIRONMENT = "Production", AUTH_MODE = "HostedDemo", DEMO_NETWORK_RESTRICTED = tostring(!var.demo_public_access), SYNTHETIC_PUBLIC_DEMO = tostring(var.demo_public_access) }, cpu = 0.5, memory = "1Gi" }]
     sap = [
       { name = "simulator", image = "sapsimulator", env = { ASPNETCORE_ENVIRONMENT = "Production", ASPNETCORE_URLS = "http://127.0.0.1:8090" }, cpu = 0.25, memory = "0.5Gi" },
       { name = "worker", image = "sapworker", env = { SAP_TRANSPORT = "ServiceBus", SAP_SIMULATOR_URL = "http://127.0.0.1:8090", SAP_COMMAND_PATH = "/tmp/commands" }, cpu = 0.25, memory = "0.5Gi" }
@@ -100,7 +104,7 @@ resource "azurerm_container_app" "runtime" {
       allow_insecure_connections = false
       transport                  = "http"
       dynamic "ip_security_restriction" {
-        for_each = toset(var.demo_allowed_ipv4_cidrs)
+        for_each = var.demo_public_access ? toset([]) : toset(var.demo_allowed_ipv4_cidrs)
         content {
           name             = "allow-${replace(replace(ip_security_restriction.value, ".", "-"), "/", "-")}"
           action           = "Allow"
@@ -154,8 +158,8 @@ resource "azurerm_container_app" "runtime" {
   }
   lifecycle {
     precondition {
-      condition     = var.enable_runtime_platform && can(regex("^[a-f0-9]{40}$", var.image_tag)) && length(var.demo_allowed_ipv4_cidrs) > 0
-      error_message = "Workload deployment requires published images and restricted demo ingress."
+      condition     = var.enable_runtime_platform && can(regex("^[a-f0-9]{40}$", var.image_tag)) && (var.demo_public_access || length(var.demo_allowed_ipv4_cidrs) > 0)
+      error_message = "Workload deployment requires published images and explicit public synthetic access or restricted demo ingress."
     }
   }
   depends_on = [azurerm_role_assignment.pull, azurerm_role_assignment.bus, azurerm_role_assignment.workflow_storage, azurerm_postgresql_flexible_server_database.runtime]

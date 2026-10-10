@@ -17,8 +17,8 @@ using LedgerPilot.Domain;
 var builder = WebApplication.CreateBuilder(args);
 var authMode=builder.Configuration["AUTH_MODE"] ?? "Entra";
 var hostedDemo=authMode=="HostedDemo";
-if(hostedDemo && (builder.Configuration["DEMO_NETWORK_RESTRICTED"]!="true" || string.IsNullOrWhiteSpace(builder.Configuration["COMMAND_STORE_CONNECTION"])))
- throw new InvalidOperationException("Hosted demo requires restricted ingress and PostgreSQL persistence.");
+if(hostedDemo && ((builder.Configuration["DEMO_NETWORK_RESTRICTED"]!="true" && builder.Configuration["SYNTHETIC_PUBLIC_DEMO"]!="true") || string.IsNullOrWhiteSpace(builder.Configuration["COMMAND_STORE_CONNECTION"])))
+ throw new InvalidOperationException("Hosted demo requires explicit restricted or public synthetic access and PostgreSQL persistence.");
 if (!builder.Environment.IsDevelopment() && !hostedDemo)
  throw new InvalidOperationException("Local development baseline only. Entra authentication and durable gates are required before deployment.");
 if(authMode is not ("Entra" or "LocalDemo" or "HostedDemo"))throw new InvalidOperationException("AUTH_MODE must be Entra, LocalDemo or HostedDemo");

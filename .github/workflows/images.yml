@@ -12,15 +12,15 @@ jobs:
       contents: read
       id-token: write
     env:
-      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
-      ACR_SERVER: ${{ vars.AZURE_ACR_SERVER }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'acrlp7dde6178' }}
+      ACR_SERVER: ${{ vars.AZURE_ACR_SERVER || 'acrlp7dde6178.azurecr.io' }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
       - name: Authenticate registry
         run: |
           test -n "$ACR_NAME" && test -n "$ACR_SERVER"

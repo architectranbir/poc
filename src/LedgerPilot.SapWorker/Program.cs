@@ -1,3 +1,5 @@
+using Azure.Identity;
+using Azure.Messaging.ServiceBus;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,14 +12,45 @@ Directory.CreateDirectory(directory);
 using var ownership=new FileStream(Path.Combine(directory,"worker.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
 using var http=new HttpClient{BaseAddress=endpoint,Timeout=TimeSpan.FromSeconds(10)};
 var options=new JsonSerializerOptions{PropertyNameCaseInsensitive=true};
-foreach(var path in Directory.GetFiles(directory,"*.command.json").Order(StringComparer.Ordinal)){
+var transport=Environment.GetEnvironmentVariable("SAP_TRANSPORT") ?? "LocalFiles";
+if(transport=="LocalFiles"){
+ foreach(var path in Directory.GetFiles(directory,"*.command.json").Order(StringComparer.Ordinal))
+ if(!await ProcessFile(path))Environment.ExitCode=1;
+}else if(transport=="ServiceBus"){
+ var fullyQualifiedNamespace=Environment.GetEnvironmentVariable("SERVICEBUS_NAMESPACE") ?? throw new InvalidOperationException("SERVICEBUS_NAMESPACE required");
+ await using var bus=new ServiceBusClient(fullyQualifiedNamespace,new DefaultAzureCredential());
+ await using var processor=bus.CreateProcessor(Environment.GetEnvironmentVariable("SERVICEBUS_QUEUE")??"sap-commands",new ServiceBusProcessorOptions{AutoCompleteMessages=false,MaxConcurrentCalls=1,MaxAutoLockRenewalDuration=TimeSpan.FromMinutes(5)});
+ processor.ProcessMessageAsync+=async args=>{
+ try{
+ var command=JsonSerializer.Deserialize<WorkerCommand>(args.Message.Body.ToString(),options)??throw new InvalidDataException("Empty command");
+ if(command.Operation is not ("Create" or "Post")||string.IsNullOrWhiteSpace(command.CommandKey)||command.CommandKey.Length>128||args.Message.MessageId!=command.CommandKey)throw new InvalidDataException("Invalid command envelope or MessageId");
+ var canonical=JsonSerializer.Serialize(command);
+ var key=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(command.Operation+":"+command.CommandKey)));
+ var path=Path.Combine(directory,key+".command.json");
+ if(File.Exists(path)&&await File.ReadAllTextAsync(path)!=canonical)throw new InvalidDataException("Command key reused with different content");
+ if(!File.Exists(path)){
+ using(var stream=new FileStream(path+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){var bytes=Encoding.UTF8.GetBytes(canonical);stream.Write(bytes);stream.Flush(true);}
+ File.Move(path+".tmp",path,true);
+ }
+ if(await ProcessFile(path))await args.CompleteMessageAsync(args.Message);
+ else await args.AbandonMessageAsync(args.Message);
+ }catch(Exception ex) when(ex is JsonException or InvalidDataException or ArgumentException){await args.DeadLetterMessageAsync(args.Message,"InvalidCommand","Command validation or reconciliation failed");}
+ };
+ processor.ProcessErrorAsync+=args=>{Console.Error.WriteLine("Service Bus processing error; inspect redacted operational telemetry.");return Task.CompletedTask;};
+ using var stop=new CancellationTokenSource();
+ Console.CancelKeyPress+=(_,e)=>{e.Cancel=true;stop.Cancel();};
+ await processor.StartProcessingAsync();
+ try{await Task.Delay(Timeout.Infinite,stop.Token);}catch(OperationCanceledException){}
+ await processor.StopProcessingAsync();
+}else throw new InvalidOperationException("SAP_TRANSPORT must be LocalFiles or ServiceBus");
+async Task<bool> ProcessFile(string path){
  var command=JsonSerializer.Deserialize<WorkerCommand>(await File.ReadAllTextAsync(path),options)??throw new InvalidDataException("Empty command");
  var hash=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command))));
  var resultPath=path+".result.json";
  if(File.Exists(resultPath)){
  var previous=JsonSerializer.Deserialize<WorkerResult>(await File.ReadAllTextAsync(resultPath),options)!;
  if(previous.CommandHash!=hash)throw new InvalidDataException("Completed command changed");
- continue;
+ return true;
  }
  try{
  JsonElement response;
@@ -37,7 +70,8 @@ foreach(var path in Directory.GetFiles(directory,"*.command.json").Order(StringC
  var result=new WorkerResult(hash,response,DateTimeOffset.UtcNow);
  using(var stream=new FileStream(resultPath+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,result);stream.Flush(true);}
  File.Move(resultPath+".tmp",resultPath,true);
- }catch(HttpRequestException){Console.Error.WriteLine("Transport failure; command remains pending for retry.");Environment.ExitCode=1;}
+ return true;
+ }catch(HttpRequestException){Console.Error.WriteLine("Transport failure; command remains pending for retry.");return false;}
 }
 async Task<JsonElement> Send(string path,object command){
  using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(JsonSerializer.Serialize(command),Encoding.UTF8,"application/json")};

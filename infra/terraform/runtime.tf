@@ -38,6 +38,9 @@ resource "azurerm_subnet" "containers" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.runtime[0].name
   address_prefixes     = ["10.42.0.0/23"]
+  lifecycle {
+    replace_triggered_by = [azurerm_virtual_network.runtime[0].location]
+  }
 }
 resource "azurerm_subnet" "postgres" {
   count                = var.enable_runtime_platform ? 1 : 0
@@ -51,6 +54,9 @@ resource "azurerm_subnet" "postgres" {
       name    = "Microsoft.DBforPostgreSQL/flexibleServers"
       actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
+  }
+  lifecycle {
+    replace_triggered_by = [azurerm_virtual_network.runtime[0].location]
   }
 }
 resource "azurerm_private_dns_zone" "postgres" {

@@ -1,0 +1,28 @@
+{
+  "positive": [
+    "WIP totals",
+    "AI explanation",
+    "project roles",
+    "create PBD",
+    "approve PBD",
+    "post PBD",
+    "posting retry"
+  ],
+  "negative": [
+    "Missing email and PO",
+    "Missing member-firm fields",
+    "Unplanned chargeable time",
+    "Aged WIP",
+    "Stale approval hash",
+    "Wrong approver",
+    "Posting before approval",
+    "Strict finance threshold boundary"
+  ],
+  "openGaps": [
+    "Complete 44-rule implementation",
+    "Real SAP accrual/PBD APIs",
+    "Actual named approver directory",
+    "Production authentication and authorization",
+    "Crash-safe idempotency across processes"
+  ]
+}

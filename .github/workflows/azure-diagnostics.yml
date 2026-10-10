@@ -35,7 +35,7 @@ jobs:
           az resource list --resource-group rg-ledgerpilot-7dde6178 --query '[].{name:name,type:type,location:location}' -o table
           az network vnet show --resource-group rg-ledgerpilot-7dde6178 --name vnet-ledgerpilot-7dde6178 --query '{location:location,subnets:subnets[].name}' -o json
           az postgres flexible-server show --resource-group rg-ledgerpilot-7dde6178 --name pg-ledgerpilot-7dde6178 --query '{location:location,state:state}' -o json || true
-          az containerapp env show --resource-group rg-ledgerpilot-7dde6178 --name cae-ledgerpilot-7dde6178 --query '{location:location,state:properties.provisioningState}' -o json || true
+          az resource show --resource-group rg-ledgerpilot-7dde6178 --name cae-ledgerpilot-7dde6178 --resource-type Microsoft.App/managedEnvironments --api-version 2024-03-01 --query '{location:location,state:properties.provisioningState}' -o json || true
       - name: Database availability in preferred and fallback regions
         run: |
           for region in southindia centralindia uksouth westeurope eastus; do

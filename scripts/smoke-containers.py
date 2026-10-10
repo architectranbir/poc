@@ -9,7 +9,9 @@ def request(path,body=None):
 def wait_url(url):
     for _ in range(180):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers if ':7071/' in url else {}),timeout=3) as response:return response.read()
+            with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers if ':7071/' in url else {}),timeout=3) as response:
+                body=response.read()
+                if '/admin/host/status' not in url or json.loads(body).get('state')=='Running':return body
         except OSError:time.sleep(1)
     raise AssertionError('Container did not become ready: '+url)
 wait_url(base+'/health')
@@ -29,7 +31,7 @@ def workflow_status():
     try:
         with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers),timeout=5) as r:return json.load(r)
     except urllib.error.HTTPError as e:
-        if e.code==404:return None
+        if e.code in (404,500,503):return None
         raise
 for _ in range(120):
     status=workflow_status()

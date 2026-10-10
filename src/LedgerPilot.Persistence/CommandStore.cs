@@ -14,6 +14,9 @@ public sealed class CommandStore(NpgsqlDataSource source)
             CREATE TABLE IF NOT EXISTS lp_outbox (
               command_key text PRIMARY KEY REFERENCES lp_command(command_key),
               published_at timestamptz);
+            CREATE TABLE IF NOT EXISTS lp_inbox (
+              command_key text PRIMARY KEY REFERENCES lp_command(command_key),
+              owner uuid NOT NULL, lease_until timestamptz NOT NULL);
             CREATE TABLE IF NOT EXISTS lp_receipt (
               command_key text PRIMARY KEY REFERENCES lp_command(command_key),
               result text NOT NULL, completed_at timestamptz NOT NULL DEFAULT now());
@@ -78,6 +81,59 @@ public sealed class CommandStore(NpgsqlDataSource source)
         await tx.CommitAsync(ct);
     }
 
+    public async Task<ExecutionClaim> Claim(string key, string payload, CancellationToken ct = default)
+    {
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        await LockAccepted(connection, tx, key, payload, ct);
+        await using var receipt = new NpgsqlCommand("SELECT result FROM lp_receipt WHERE command_key=$1", connection, tx);
+        receipt.Parameters.AddWithValue(key);
+        if (await receipt.ExecuteScalarAsync(ct) is string result) return new(null, result);
+        var owner = Guid.NewGuid();
+        await using var claim = new NpgsqlCommand("""
+            INSERT INTO lp_inbox(command_key,owner,lease_until) VALUES ($1,$2,clock_timestamp()+interval '120 seconds')
+            ON CONFLICT(command_key) DO UPDATE SET owner=EXCLUDED.owner,lease_until=EXCLUDED.lease_until
+            WHERE lp_inbox.lease_until<=clock_timestamp() RETURNING owner
+            """, connection, tx);
+        claim.Parameters.AddWithValue(key); claim.Parameters.AddWithValue(owner);
+        var acquired = await claim.ExecuteScalarAsync(ct) is Guid;
+        await tx.CommitAsync(ct);
+        return new(acquired ? owner : null, null);
+    }
+
+    public async Task CompleteOwned(string key, Guid owner, string result, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(result);
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        // Same command row lock as Claim: claim replacement cannot race receipt commit.
+        await using var command = new NpgsqlCommand("SELECT command_key FROM lp_command WHERE command_key=$1 FOR UPDATE", connection, tx);
+        command.Parameters.AddWithValue(key); await command.ExecuteScalarAsync(ct);
+        await using var lease = new NpgsqlCommand("SELECT 1 FROM lp_inbox WHERE command_key=$1 AND owner=$2 AND lease_until>clock_timestamp() FOR UPDATE", connection, tx);
+        lease.Parameters.AddWithValue(key); lease.Parameters.AddWithValue(owner);
+        if (await lease.ExecuteScalarAsync(ct) is null) throw new ExecutionLeaseLostException();
+        await using var insert = new NpgsqlCommand("INSERT INTO lp_receipt(command_key,result) VALUES ($1,$2) ON CONFLICT DO NOTHING", connection, tx);
+        insert.Parameters.AddWithValue(key); insert.Parameters.AddWithValue(result); await insert.ExecuteNonQueryAsync(ct);
+        await using var check = new NpgsqlCommand("SELECT result FROM lp_receipt WHERE command_key=$1", connection, tx);
+        check.Parameters.AddWithValue(key);
+        if ((string?)await check.ExecuteScalarAsync(ct) != result) throw new InvalidDataException("Conflicting command receipt.");
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task Release(string key, Guid owner, CancellationToken ct = default)
+    {
+        await using var cmd = source.CreateCommand("UPDATE lp_inbox SET lease_until=clock_timestamp() WHERE command_key=$1 AND owner=$2");
+        cmd.Parameters.AddWithValue(key); cmd.Parameters.AddWithValue(owner);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    static async Task LockAccepted(NpgsqlConnection connection, NpgsqlTransaction tx, string key, string payload, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand("SELECT payload FROM lp_command WHERE command_key=$1 FOR UPDATE", connection, tx);
+        cmd.Parameters.AddWithValue(key);
+        if ((string?)await cmd.ExecuteScalarAsync(ct) != payload) throw new InvalidDataException("Command is not accepted or its content differs.");
+    }
+
     public async Task VerifyAccepted(string key, string canonicalPayload, CancellationToken ct = default)
     {
         await using var cmd = source.CreateCommand("SELECT payload FROM lp_command WHERE command_key=$1");
@@ -93,3 +149,6 @@ public sealed class CommandStore(NpgsqlDataSource source)
         return (string?)await cmd.ExecuteScalarAsync(ct);
     }
 }
+
+public sealed record ExecutionClaim(Guid? Owner, string? Result);
+public sealed class ExecutionLeaseLostException : Exception { public ExecutionLeaseLostException() : base("Execution lease expired or changed.") { } }

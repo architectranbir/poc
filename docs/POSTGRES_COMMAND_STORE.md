@@ -26,3 +26,13 @@ Confirmed posting atomically saves `POST_PENDING`, the immutable `CreateAndPost`
 GitHub's PostgreSQL API smoke uses a synthetic local file handoff of the exact accepted command to the worker, which verifies it against PostgreSQL. It does not run the Azure Service Bus transport. Both create and post responses are deliberately lost after simulator commit; retries recover the same document and posting reference. API restart, PostgreSQL-only state, duplicate posting requests and second-writer rejection are also checked.
 
 This is a conservative single-writer PoC migration, not normalized multi-instance billing storage. Schema bootstrap, synchronous snapshot persistence and the legacy `MockSapPostingId` response field remain temporary. Distributed inbox leases, versioned migrations, live Service Bus validation, Durable Functions orchestration and Azure deployment remain pending. After an ambiguous database commit or connection failure, restart the API to reload committed state before resuming operations.
+
+## Worker inbox ownership
+
+`lp_inbox` records a UUID owner and a database-clock expiry for each accepted command. `Claim` locks the accepted command while checking its canonical payload, existing receipt and ownership. Concurrent claim attempts produce one owner. Completed deliveries return the stored receipt without claiming execution.
+
+The worker uses a 45-second execution deadline within a 120-second lease. `CompleteOwned` checks the unexpired ownership token in the same transaction as receipt persistence. Replaced or expired owners cannot save a receipt. Normal failures release ownership with a token-qualified update; a crashed worker's lease expires. Broker messages are completed only after a receipt exists. Busy claims are abandoned for redelivery; this can consume Service Bus delivery attempts, so live load tests must validate backoff and dead-letter recovery before deployment.
+
+A lease does not make external SAP writes exactly once. Process suspension, network partitions or an HTTP request accepted after cancellation can overlap an expired worker with its replacement. The stable external SAP command key and reconciliation remain mandatory. No lease renewal is needed for the current bounded synthetic operation; longer real SAP workflows need reviewed timing/renewal or orchestration. The older `Complete` method is for isolated receipt tests; runtime workers use only `CompleteOwned`.
+
+Three additional PostgreSQL tests cover eight competing claims, receipt replay, wrong-owner rejection, expiry takeover, stale-owner commit/release rejection and immediate retry after release. Existing lost-response and API-to-worker tests exercise worker ownership along with SAP reconciliation.

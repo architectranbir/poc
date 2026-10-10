@@ -57,10 +57,14 @@ async Task<bool> ProcessFile(string path){
  if(commandStore is not null)await commandStore.VerifyAccepted(command.CommandKey,canonical);
  var hash=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(command.CanonicalPayload())));
  var resultPath=path+".result.json";
+ Guid? leaseOwner=null;
  if(commandStore is not null){
- var saved=await commandStore.Receipt(command.CommandKey);
- if(saved is not null)return true;
+ var claim=await commandStore.Claim(command.CommandKey,canonical);
+ if(claim.Result is not null)return true;
+ if(claim.Owner is null){Console.Error.WriteLine("Command is already being processed; retry later.");return false;}
+ leaseOwner=claim.Owner;
  }
+ using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(45));
  if(commandStore is null && File.Exists(resultPath)){
  var previous=JsonSerializer.Deserialize<WorkerResult>(await File.ReadAllTextAsync(resultPath),options)!;
  if(previous.CommandHash!=hash)throw new InvalidDataException("Completed command changed");
@@ -69,35 +73,42 @@ async Task<bool> ProcessFile(string path){
  try{
  JsonElement response;
  if(command.Operation is "Create" or "CreateAndPost"){
- using var lookup=await http.GetAsync("/commands/"+Uri.EscapeDataString(command.CommandKey));
- if(lookup.StatusCode==HttpStatusCode.NotFound)response=await Send("/documents",new {command.CommandKey,command.ProjectId,command.Net,command.Currency,command.StateHash});
+ using var lookup=await http.GetAsync("/commands/"+Uri.EscapeDataString(command.CommandKey),deadline.Token);
+ if(lookup.StatusCode==HttpStatusCode.NotFound)response=await Send("/documents",new {command.CommandKey,command.ProjectId,command.Net,command.Currency,command.StateHash},deadline.Token);
  else{lookup.EnsureSuccessStatusCode();response=JsonDocument.Parse(await lookup.Content.ReadAsStringAsync()).RootElement.Clone();}
  var request=response.GetProperty("request");
  if(request.GetProperty("commandKey").GetString()!=command.CommandKey||request.GetProperty("projectId").GetString()!=command.ProjectId||request.GetProperty("net").GetDecimal()!=command.Net||request.GetProperty("currency").GetString()!=command.Currency||request.GetProperty("stateHash").GetString()!=command.StateHash)
  throw new InvalidDataException("Reconciled document differs from command");
  }else if(command.Operation=="Post"){
- using var lookup=await http.GetAsync("/documents/"+Uri.EscapeDataString(command.DocumentId??throw new InvalidDataException("Document ID required")));
+ using var lookup=await http.GetAsync("/documents/"+Uri.EscapeDataString(command.DocumentId??throw new InvalidDataException("Document ID required")),deadline.Token);
  lookup.EnsureSuccessStatusCode();var doc=JsonDocument.Parse(await lookup.Content.ReadAsStringAsync()).RootElement.Clone();
  if(doc.GetProperty("status").GetString()=="POSTED"&&doc.GetProperty("postingCommandKey").GetString()==command.CommandKey&&doc.GetProperty("request").GetProperty("stateHash").GetString()==command.StateHash)response=doc;
- else response=await Send($"/documents/{Uri.EscapeDataString(command.DocumentId!)}/post",new {command.CommandKey,command.StateHash});
+ else response=await Send($"/documents/{Uri.EscapeDataString(command.DocumentId!)}/post",new {command.CommandKey,command.StateHash},deadline.Token);
  }else throw new InvalidDataException("Unknown operation");
  if(command.Operation=="CreateAndPost"){
  var doc=response;
  if(doc.GetProperty("status").GetString()=="POSTED"){
  if(doc.GetProperty("postingCommandKey").GetString()!=command.CommandKey)throw new InvalidDataException("Posting command differs");
- }else response=await Send($"/documents/{Uri.EscapeDataString(doc.GetProperty("id").GetString()!)}/post",new {command.CommandKey,command.StateHash});
+ }else response=await Send($"/documents/{Uri.EscapeDataString(doc.GetProperty("id").GetString()!)}/post",new {command.CommandKey,command.StateHash},deadline.Token);
  }
  var result=new WorkerResult(hash,response,DateTimeOffset.UtcNow);
- if(commandStore is not null){await commandStore.Complete(command.CommandKey,JsonSerializer.Serialize(response));return true;}
+ if(commandStore is not null){await commandStore.CompleteOwned(command.CommandKey,leaseOwner!.Value,JsonSerializer.Serialize(response),deadline.Token);return true;}
  using(var stream=new FileStream(resultPath+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,result);stream.Flush(true);}
  File.Move(resultPath+".tmp",resultPath,true);
  return true;
- }catch(HttpRequestException){Console.Error.WriteLine("Transport failure; command remains pending for retry.");return false;}
+ }catch(Exception ex) when(ex is HttpRequestException or OperationCanceledException or ExecutionLeaseLostException){Console.Error.WriteLine("Execution incomplete; command remains pending for reconciliation.");return false;}
+ finally{
+ if(commandStore is not null && leaseOwner is not null){
+ using var releaseDeadline=new CancellationTokenSource(TimeSpan.FromSeconds(5));
+ try{await commandStore.Release(command.CommandKey,leaseOwner.Value,releaseDeadline.Token);}
+ catch(Exception ex) when(ex is NpgsqlException or OperationCanceledException){Console.Error.WriteLine("Lease release failed; ownership will expire.");}
+ }
+ }
 }
-async Task<JsonElement> Send(string path,object command){
+async Task<JsonElement> Send(string path,object command,CancellationToken ct){
  using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(JsonSerializer.Serialize(command),Encoding.UTF8,"application/json")};
  if(Environment.GetEnvironmentVariable("SIMULATE_RESPONSE_LOSS")=="true")request.Headers.Add("X-Simulate-Response-Loss","true");
- using var response=await http.SendAsync(request);response.EnsureSuccessStatusCode();
+ using var response=await http.SendAsync(request,ct);response.EnsureSuccessStatusCode();
  return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
 }
 record WorkerResult(string CommandHash,JsonElement Response,DateTimeOffset CompletedAt);

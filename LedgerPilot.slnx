@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/LedgerPilot.Workflows/LedgerPilot.Workflows.csproj" />
     <Project Path="src/LedgerPilot.OutboxDispatcher/LedgerPilot.OutboxDispatcher.csproj" />
     <Project Path="src/LedgerPilot.Api/LedgerPilot.Api.csproj" />
     <Project Path="src/LedgerPilot.Persistence/LedgerPilot.Persistence.csproj" />
@@ -8,6 +9,7 @@
     <Project Path="src/LedgerPilot.SapWorker/LedgerPilot.SapWorker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/LedgerPilot.Workflows.Tests/LedgerPilot.Workflows.Tests.csproj" />
     <Project Path="tests/LedgerPilot.Persistence.Tests/LedgerPilot.Persistence.Tests.csproj" />
     <Project Path="tests/LedgerPilot.Domain.Tests/LedgerPilot.Domain.Tests.csproj" />
   </Folder>

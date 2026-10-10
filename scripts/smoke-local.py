@@ -122,6 +122,12 @@ def run():
             updated = request(f"/api/projects/{p['id']}/wip")
             assert updated["total"] == snapshot["total"] - 1
             assert updated["position"]["writeOff"] == 1
+            audit = request(f"/api/projects/{p['id']}/adjustments")
+            assert len(audit) == 1
+            assert audit[0]["eventId"] == adjustment["eventId"]
+            assert audit[0]["before"]["bill"] - audit[0]["after"]["bill"] == 1
+            assert audit[0]["reason"] == adjustment["reason"]
+            assert audit[0]["actor"] == p["requestor"]
             request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, amount=2), expected=400)
             request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="too-much", amount=100000000), expected=400)
             fresh = request(f"/api/projects/{p['id']}/pbd", dict(body, idempotencyKey="fresh"))
@@ -153,6 +159,9 @@ def run():
                             time.sleep(0.1)
                     restored = request(f"/api/projects/{p['id']}/wip")
                     assert restored["total"] == snapshot["total"] - 2
+                    restored_audit = request(f"/api/projects/{p['id']}/adjustments")
+                    assert len(restored_audit) == 2
+                    assert restored_audit[0]["at"] == audit[0]["at"]
                     request(f"/api/projects/{p['id']}/adjustments", adjustment)
                     assert request(f"/api/projects/{p['id']}/wip")["total"] == restored["total"]
                     same_doc = request(f"/api/projects/{p['id']}/pbd", body)

@@ -84,6 +84,12 @@ app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,Billin
  var available=s.Position(id,lines).Bill;var gap=req.ProposedAmount-available;
  return Results.Ok(new {available,proposed=req.ProposedAmount,difference=gap,accrualQuestion=gap>10000m,thresholdAssumption="Proposed - Available WIP > 10000. Business sign-off pending.",findings=e.Findings(project,lines),financeApproval=e.RequiresFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp)});
 });
+app.MapGet("/api/projects/{id}/adjustments",async(string id,BillingStore s,HttpContext context)=>{
+ var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
+ var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
+ return Results.Ok(s.AdjustmentHistory(id,lines));
+});
 app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  if(req.Actor is null || req.Actor.Length<2 || req.Confirm!=true)return Results.BadRequest(new {error="Actor and explicit confirmation required."});
@@ -282,6 +288,17 @@ class BillingStore : IDisposable{
  var previous=financeApprovals.GetValueOrDefault(project);financeApprovals[project]=approval;
  try{SaveLocal();}catch{if(previous is null)financeApprovals.Remove(project);else financeApprovals[project]=previous;throw;}
  return approval;
+ }}
+ public object[] AdjustmentHistory(string project,List<WipLine> lines){lock(adjustmentLock){
+ var events=adjustments.GetValueOrDefault(project) ?? [];
+ var accepted=new List<AdjustmentEvent>();var history=new List<object>();
+ foreach(var ev in events){
+ var before=BillingCalculations.Replay(Source(lines),accepted).Lines.First(x=>x.LineId==ev.LineId);
+ accepted.Add(ev);
+ var after=BillingCalculations.Replay(Source(lines),accepted).Lines.First(x=>x.LineId==ev.LineId);
+ history.Add(new {projectId=project,eventId=ev.EventId,lineId=ev.LineId,action=ev.Kind.ToString(),ev.Amount,ev.Actor,reason=ev.Rationale,ev.At,before,after,provenance="Event metadata is committed; allocations are reconstructed from current source"});
+ }
+ return history.ToArray();
  }}
  public FinancialPosition Position(string project,List<WipLine> lines){
  lock(adjustmentLock) return BillingCalculations.Replay(Source(lines),adjustments.GetValueOrDefault(project) ?? [],(writeUps.GetValueOrDefault(project) ?? []).Sum(x=>x.Amount));

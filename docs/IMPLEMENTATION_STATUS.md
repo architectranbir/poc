@@ -80,3 +80,8 @@ Smoke verifies GBP/VAT reconciliation, VAT acknowledgement rejection, EUR curren
 A separate fixed-price calculator validates contract/history values, unique milestone identity, due cutoff, cancellation, partially/fully billed amounts and remaining contract capacity. It derives the proposed bill solely from selected outstanding milestone values. Eleven new domain cases pass (47 total).
 
 The API preview reads a server-side synthetic schedule; callers supply only cutoff and milestone selection. Smoke verifies the due £20,000 milestone and rejects already billed, future, unknown and duplicate selections. The fixture explicitly separates past/due/future milestones. Fixed-price draft selection, schedule concurrency, posting updates and UI integration remain pending; V-11 remains partial.
+
+## WIP adjustment UI and history
+React displays source WIP rows with remaining allocation, and provides explicit line/action/partial-amount/reason confirmation. Unchanged retries retain a stable command ID. Successful commands refresh WIP/history and clear displayed draft, review and commercial preview. The history API enforces project read authorization in Entra mode and exposes committed event metadata plus reconstructed before/after allocations.
+
+Smoke verifies one history entry after duplicate delivery and preserved actor/reason/timestamp across restart. .NET/React builds pass. Browser interaction and bulk-adjustment tests remain pending. Before/after allocations are reconstructed from current source, not immutable source-version snapshots; W-10 is therefore partial. History is not a tamper-proof external audit store.

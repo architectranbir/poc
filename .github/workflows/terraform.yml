@@ -1,5 +1,22 @@
 name: Terraform Azure foundation
 on:
+  workflow_call:
+    inputs:
+      action:
+        type: string
+        default: plan
+      runtime_platform:
+        type: boolean
+        default: false
+      workloads:
+        type: boolean
+        default: false
+      image_tag:
+        type: string
+        default: ""
+    secrets:
+      POSTGRES_ADMIN_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       action:
@@ -75,7 +92,7 @@ jobs:
       - run: terraform plan -input=false -lock-timeout=5m -out=tfplan
       - uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan-${{ github.sha }}
+          name: terraform-plan-${{ github.sha }}-${{ inputs.workloads }}
           path: infra/terraform/tfplan
           retention-days: 1
   apply:
@@ -96,7 +113,7 @@ jobs:
           terraform_version: 1.13.5
       - uses: actions/download-artifact@v4
         with:
-          name: terraform-plan-${{ github.sha }}
+          name: terraform-plan-${{ github.sha }}-${{ inputs.workloads }}
           path: infra/terraform
       - name: Initialize OIDC remote state
         run: >-

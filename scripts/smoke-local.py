@@ -23,7 +23,8 @@ def run():
         port = sock.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
     state_dir = tempfile.mkdtemp(prefix="ledgerpilot-smoke-")
-    env = dict(os.environ, AUTH_MODE="LocalDemo", STATE_PATH=str(Path(state_dir) / "billing.json"), ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
+    shutil.copytree(root / "seed", Path(state_dir) / "seed")
+    env = dict(os.environ, SEED_PATH=str(Path(state_dir) / "seed"), AUTH_MODE="LocalDemo", STATE_PATH=str(Path(state_dir) / "billing.json"), ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
                FOUNDRY_PROJECT_ENDPOINT="", FOUNDRY_MODEL="", BLOB_CONTAINER="", COSMOS_ENDPOINT="")
     with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as api:
@@ -65,7 +66,7 @@ def run():
                     {"lineId": snapshot["lines"][0]["id"], "action": "WRITE_OFF",
                      "actor": p["requestor"], "reason": "test", "confirm": False}, expected=400)
             body = {"actor": p["requestor"], "confirm": True,
-                    "narrative": "Synthetic test", "idempotencyKey": "smoke-draft"}
+                    "narrative": "Synthetic test", "idempotencyKey": "smoke-draft", "vatConfirmed": True, "currencyConfirmed": True}
             request(f"/api/projects/{p['id']}/pbd", dict(body, actor="unrelated-user"), expected=403)
             confirms = [f for f in snapshot["findings"] if f["severity"] == "CONFIRM"]
             assert confirms, "Fixture must exercise confirmation gating"
@@ -73,7 +74,9 @@ def run():
                 request(f"/api/projects/{p['id']}/pbd", body, expected=400)
                 request(f"/api/projects/{p['id']}/pbd", dict(body, acknowledgements=[{"findingId": f["id"], "dependencyHash": "stale"} for f in confirms]), expected=400)
             body["acknowledgements"] = [{"findingId": f["id"], "dependencyHash": f["dependencyHash"]} for f in confirms]
+            request(f"/api/projects/{p['id']}/pbd", dict(body, vatConfirmed=False), expected=400)
             doc = request(f"/api/projects/{p['id']}/pbd", body)
+            assert doc["commercial"]["gross"] == doc["commercial"]["billingNet"] + doc["commercial"]["vat"]
             again = request(f"/api/projects/{p['id']}/pbd", body)
             assert doc["id"] == again["id"]
             request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
@@ -87,6 +90,24 @@ def run():
             repeated = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
             assert posted["status"] == "POSTED"
             assert posted["mockSapPostingId"] == repeated["mockSapPostingId"]
+            alternate = next(x for x in projects if x["currency"] != x["billingCurrency"])
+            alt_wip = request(f"/api/projects/{alternate['id']}/wip")
+            alt_body = {"actor": alternate["requestor"], "confirm": True, "narrative": "Synthetic EUR bill",
+                        "idempotencyKey": "alternate-draft", "vatConfirmed": True,
+                        "acknowledgements": [{"findingId": f["id"], "dependencyHash": f["dependencyHash"]} for f in alt_wip["findings"] if f["severity"] == "CONFIRM"]}
+            request(f"/api/projects/{alternate['id']}/pbd", alt_body, expected=400)
+            alt_doc = request(f"/api/projects/{alternate['id']}/pbd", dict(alt_body, currencyConfirmed=True))
+            assert alt_doc["currency"] == "EUR"
+            assert alt_doc["commercial"]["exchangeRate"]["rate"] == 1.15
+            assert alt_doc["commercial"]["vat"] == 0
+            assert alt_doc["amount"] == request(f"/api/projects/{alternate['id']}/commercial-preview")["preview"]["billingNet"]
+            seed_path = Path(env["SEED_PATH"]) / "projects.json"
+            original_seed = seed_path.read_text()
+            edited_seed = json.loads(original_seed)
+            next(x for x in edited_seed if x["id"] == alternate["id"])["email"] = "changed@example.test"
+            seed_path.write_text(json.dumps(edited_seed))
+            request(f"/api/pbd/{alt_doc['id']}/approve", {"actor": alternate["requestor"], "confirm": True, "stateHash": alt_doc["stateHash"], "version": alt_doc["version"]}, expected=409)
+            seed_path.write_text(original_seed)
             adjustment = {"lineId": snapshot["lines"][0]["id"], "action": "WRITE_OFF",
                           "actor": p["requestor"], "reason": "Synthetic partial write-off",
                           "confirm": True, "amount": 1, "eventId": "smoke-adjustment"}

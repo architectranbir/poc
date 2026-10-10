@@ -35,3 +35,10 @@ The development store now writes versioned atomic JSON snapshots for adjustments
 Smoke coverage stops/restarts the API, verifies adjusted totals, repeats an adjustment and draft command, retrieves the same posting reference, rejects stale draft posting, checks exclusive store ownership and rejects corrupted JSON.
 
 This is a single-process local recovery adapter, not the Azure transactional relational store. It does not provide distributed concurrency, database transactions/outbox, disaster recovery or power-loss guarantees across filesystems. Hosted deployment remains disabled. COSMOS_ENDPOINT is rejected because the earlier write-only Cosmos path could not recover authoritative state. STATE_PATH selects an isolated development file; never use production financial data.
+
+## Authoritative AI inputs and demo role checks
+The explain endpoint now loads project, financial position and findings server-side. Caller-supplied facts are rejected, unknown projects return 404, and empty/oversized messages return 400. Decimal figures are serialized as invariant exact strings in the model context. The React caller no longer supplies facts. This does not guarantee numeric fidelity in generated text; live-model evaluations remain pending.
+
+Adjustment, draft creation, approval and posting (including repeated posting requests) consistently require a project-mapped demo role. Unrelated actor strings are rejected with 403. These are synthetic local role checks, not authentication: actor strings remain caller-supplied, so JWT validation/project authorization must replace them before shared use. Loopback and Development restrictions remain enforced.
+
+Compiled smoke checks cover unrelated adjustment/draft/post actors and rejected AI fact injection, missing project and message length boundaries. No live Foundry inference was performed.

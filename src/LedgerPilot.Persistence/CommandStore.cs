@@ -134,6 +134,28 @@ public sealed class CommandStore(NpgsqlDataSource source)
         if ((string?)await cmd.ExecuteScalarAsync(ct) != payload) throw new InvalidDataException("Command is not accepted or its content differs.");
     }
 
+    public async Task<string?> AcceptedPayload(string key, CancellationToken ct = default)
+    {
+        await using var cmd = source.CreateCommand("SELECT payload FROM lp_command WHERE command_key=$1");
+        cmd.Parameters.AddWithValue(key);return (string?)await cmd.ExecuteScalarAsync(ct);
+    }
+
+    public async Task<string[]> PendingPostings(CancellationToken ct = default)
+    {
+        // Only syntactically valid accepted posting commands; fixture-only text records are ignored.
+        await using var cmd = source.CreateCommand("SELECT c.command_key,c.payload FROM lp_command c LEFT JOIN lp_receipt r USING(command_key) WHERE r.command_key IS NULL ORDER BY c.accepted_at LIMIT 1000");
+        await using var reader = await cmd.ExecuteReaderAsync(ct);var keys = new List<string>();
+        while (await reader.ReadAsync(ct)) {
+            try {
+                var command = System.Text.Json.JsonSerializer.Deserialize<SapCommand>(reader.GetString(1));
+                if (command?.Operation == "CreateAndPost" && command.CommandKey == reader.GetString(0)) {
+                    command.Validate();keys.Add(command.CommandKey);
+                }
+            } catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException) { }
+        }
+        return keys.ToArray();
+    }
+
     public async Task VerifyAccepted(string key, string canonicalPayload, CancellationToken ct = default)
     {
         await using var cmd = source.CreateCommand("SELECT payload FROM lp_command WHERE command_key=$1");

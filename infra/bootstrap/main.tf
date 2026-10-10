@@ -33,7 +33,7 @@ resource "azurerm_user_assigned_identity" "github" {
 }
 resource "azurerm_federated_identity_credential" "github" {
   for_each            = toset(["azure-poc-plan", "azure-poc-apply"])
-  name                = each.key
+  name                = "${each.key}-v2"
   resource_group_name = azurerm_resource_group.bootstrap.name
   parent_id           = azurerm_user_assigned_identity.github.id
   audience            = ["api://AzureADTokenExchange"]

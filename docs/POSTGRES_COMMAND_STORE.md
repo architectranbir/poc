@@ -16,3 +16,13 @@ dotnet test tests/LedgerPilot.Persistence.Tests -c Release
 ```
 
 GitHub Actions provisions PostgreSQL 17 for these tests. Tests fail when the connection is absent rather than silently skipping. They exercise concurrent same-key acceptance, conflicting keys, broker failure/retry, competing publisher locks, durable receipts and unknown-command rejection. Local Release compilation passed; local PostgreSQL execution was unavailable in the restricted workspace. Check the commit's workflow run for integration execution evidence.
+
+## API snapshot and atomic posting acceptance
+
+The API now selects PostgreSQL billing state when `COMMAND_STORE_CONNECTION` is supplied. A single JSON snapshot in `lp_billing_snapshot` retains adjustments, audit snapshots, write-ups, Finance approvals, PBDs and idempotency keys. A session advisory lock rejects a second API writer; revision checks guard snapshot writes. This deliberately supports one API instance only. Project/WIP master data still comes from the configured seed/blob source. Existing local JSON files are not automatically imported.
+
+Confirmed posting atomically saves `POST_PENDING`, the immutable `CreateAndPost` command and its outbox row. The worker creates/reconciles the simulator document, posts/reconciles it, then saves its receipt. API GET PBD reconciles that receipt to `POSTED`. The web UI includes an explicit refresh control. Approval and authorization precede acceptance; the billing hash is checked again under the API mutation lock.
+
+GitHub's PostgreSQL API smoke uses a synthetic local file handoff of the exact accepted command to the worker, which verifies it against PostgreSQL. It does not run the Azure Service Bus transport. Both create and post responses are deliberately lost after simulator commit; retries recover the same document and posting reference. API restart, PostgreSQL-only state, duplicate posting requests and second-writer rejection are also checked.
+
+This is a conservative single-writer PoC migration, not normalized multi-instance billing storage. Schema bootstrap, synchronous snapshot persistence and the legacy `MockSapPostingId` response field remain temporary. Distributed inbox leases, versioned migrations, live Service Bus validation, Durable Functions orchestration and Azure deployment remain pending. After an ambiguous database commit or connection failure, restart the API to reload committed state before resuming operations.

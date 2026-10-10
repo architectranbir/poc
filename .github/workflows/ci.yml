@@ -46,6 +46,10 @@ jobs:
         name: PostgreSQL worker recovery smoke
         env:
           COMMAND_STORE_CONNECTION: Host=localhost;Username=ledgerpilot;Password=local-test-only;Database=ledgerpilot_tests
+      - run: python3 scripts/smoke-postgres-api.py
+        name: PostgreSQL API to SAP worker smoke
+        env:
+          COMMAND_STORE_CONNECTION: Host=localhost;Username=ledgerpilot;Password=local-test-only;Database=ledgerpilot_tests
       - run: npm ci && npm run build
         working-directory: web
       - uses: actions/upload-artifact@v4

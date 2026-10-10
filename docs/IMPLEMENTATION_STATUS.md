@@ -111,3 +111,7 @@ Added a separate Npgsql command store with transactional command/outbox acceptan
 ## Outbox publisher and PostgreSQL worker receipt integration
 
 Added a Development-only Service Bus outbox dispatcher using managed-identity-compatible authentication, immutable message IDs and bounded dispatch attempts. SAP worker PostgreSQL mode verifies accepted payloads and persists result receipts before queue completion. Service Bus mode requires PostgreSQL. Local file transport remains for offline tests. Added a second simulator smoke run in CI against PostgreSQL, covering lost-response recovery and spool replacement. Local Release build and existing simulator smoke passed. API JSON state still needs migration and atomic approval-to-command transitions; no live Azure queue test or cloud deployment has occurred.
+
+## PostgreSQL API and atomic posting command acceptance
+
+API PostgreSQL mode persists the billing snapshot and atomically queues confirmed posting with its outbox record. Posting stays POST_PENDING until the separate worker's persistent SAP receipt is reconciled. Worker CreateAndPost recovers lost create and post responses. React includes posting-status refresh. Added PostgreSQL transaction rollback/restart/single-writer tests and API-to-worker smoke in CI. Local JSON mode remains isolated; existing JSON is not imported. Single API writer only; master data still seed/blob. Live queue, Durable Functions, Azure deployment and complete 44-rule demonstration remain pending.

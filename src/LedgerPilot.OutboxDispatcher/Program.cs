@@ -15,7 +15,7 @@ if (args is ["--enqueue", var file]) {
     var command = JsonSerializer.Deserialize<SapCommand>(await File.ReadAllTextAsync(file), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
         ?? throw new InvalidDataException("Empty command.");
     command.Validate();
-    await store.Accept(command.CommandKey, JsonSerializer.Serialize(command)); return;
+    await store.Accept(command.CommandKey, command.CanonicalPayload()); return;
 }
 if (args is ["--receipt", var key]) { Console.WriteLine(await store.Receipt(key) ?? "null"); return; }
 if (args.Length != 0) throw new ArgumentException("Unknown arguments.");

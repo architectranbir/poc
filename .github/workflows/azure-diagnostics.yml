@@ -29,5 +29,5 @@ jobs:
           for region in southindia centralindia uksouth westeurope eastus; do
             echo "PostgreSQL capabilities: $region"
             az postgres flexible-server list-skus --location "$region" -o json > "$region.json"
-            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps(d)[:20000])' "$region.json"
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps([{"reason":c.get("reason"),"versions":c.get("supportedServerVersions"),"b1ms":[s for e in c.get("supportedServerEditions",[]) for s in e.get("supportedServerSkus",[]) if s.get("name")=="Standard_B1ms"]} for c in d]))' "$region.json"
           done

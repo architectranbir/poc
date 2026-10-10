@@ -1,3 +1,7 @@
+variable "runtime_location" {
+  type    = string
+  default = "centralindia"
+}
 variable "enable_runtime_platform" {
   type    = bool
   default = false
@@ -24,7 +28,7 @@ resource "azurerm_virtual_network" "runtime" {
   count               = var.enable_runtime_platform ? 1 : 0
   name                = "vnet-${local.prefix}"
   resource_group_name = azurerm_resource_group.main.name
-  location            = var.location
+  location            = var.runtime_location
   address_space       = ["10.42.0.0/16"]
   tags                = local.tags
 }
@@ -66,7 +70,7 @@ resource "azurerm_postgresql_flexible_server" "runtime" {
   count                         = var.enable_runtime_platform ? 1 : 0
   name                          = "pg-${local.prefix}"
   resource_group_name           = azurerm_resource_group.main.name
-  location                      = var.location
+  location                      = var.runtime_location
   version                       = "17"
   administrator_login           = "ledgerpilotadmin"
   administrator_password        = var.postgres_admin_password
@@ -90,7 +94,7 @@ resource "azurerm_container_app_environment" "runtime" {
   count                      = var.enable_runtime_platform ? 1 : 0
   name                       = "cae-${local.prefix}"
   resource_group_name        = azurerm_resource_group.main.name
-  location                   = var.location
+  location                   = var.runtime_location
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
   infrastructure_subnet_id   = azurerm_subnet.containers[0].id
   tags                       = local.tags

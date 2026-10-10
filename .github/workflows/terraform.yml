@@ -49,6 +49,7 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
   TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX || '7dde6178' }}
   TF_VAR_location: ${{ vars.AZURE_REGION || 'southindia' }}
+  TF_VAR_runtime_location: ${{ vars.AZURE_RUNTIME_REGION || 'centralindia' }}
   TF_VAR_enable_workloads: ${{ inputs.workloads }}
   TF_VAR_image_tag: ${{ inputs.image_tag }}
   TF_VAR_demo_public_access: ${{ vars.DEMO_PUBLIC_ACCESS || 'true' }}

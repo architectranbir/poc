@@ -22,7 +22,7 @@ def run():
         port = sock.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
     state_dir = tempfile.mkdtemp(prefix="ledgerpilot-smoke-")
-    env = dict(os.environ, STATE_PATH=str(Path(state_dir) / "billing.json"), ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
+    env = dict(os.environ, AUTH_MODE="LocalDemo", STATE_PATH=str(Path(state_dir) / "billing.json"), ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
                FOUNDRY_PROJECT_ENDPOINT="", FOUNDRY_MODEL="", BLOB_CONTAINER="", COSMOS_ENDPOINT="")
     with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as api:
@@ -182,6 +182,37 @@ def run():
     assert result.returncode != 0
     assert b"Local development baseline only" in result.stderr
     print("PASS: non-Development startup rejected")
+    auth_env = dict(env, ASPNETCORE_ENVIRONMENT="Development", AUTH_MODE="Entra",
+                    ENTRA_TENANT_ID="11111111-1111-1111-1111-111111111111", ENTRA_API_AUDIENCE="api://ledgerpilot-test")
+    Path(auth_env["STATE_PATH"]).unlink()
+    with subprocess.Popen([dotnet, str(dll)], cwd=root, env=auth_env,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as secured:
+        try:
+            deadline = time.monotonic() + 20
+            while True:
+                try:
+                    urllib.request.urlopen(base + "/health", timeout=2).close()
+                    break
+                except OSError:
+                    if secured.poll() is not None or time.monotonic() >= deadline:
+                        raise RuntimeError("Entra-mode startup failed")
+                    time.sleep(0.1)
+            for path, body in [("/api/projects", None), ("/api/ai/explain", {"userMessage": "test", "projectId": p["id"]}),
+                               (f"/api/projects/{p['id']}/pbd", {"actor": p["requestor"], "confirm": True})]:
+                req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+                try:
+                    urllib.request.urlopen(req, timeout=5)
+                    raise AssertionError("Anonymous Entra-mode access accepted")
+                except urllib.error.HTTPError as error:
+                    assert error.code == 401
+            print("PASS: Entra mode rejects anonymous read, AI and write requests")
+        finally:
+            secured.terminate()
+            secured.wait(timeout=5)
+    missing_config = subprocess.run([dotnet, str(dll)], cwd=root,
+        env=dict(auth_env, ENTRA_TENANT_ID="", ENTRA_API_AUDIENCE=""), capture_output=True, timeout=10)
+    assert missing_config.returncode != 0
+    print("PASS: missing Entra configuration rejected")
     shutil.rmtree(state_dir)
 
 

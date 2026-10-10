@@ -4,5 +4,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export SEED_PATH="$ROOT/seed"
 export WEB_ORIGIN=http://localhost:5173
 export ASPNETCORE_ENVIRONMENT=Development
+export AUTH_MODE=LocalDemo
 cd "$ROOT/src/LedgerPilot.Api"
 dotnet run --urls http://localhost:8080

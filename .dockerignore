@@ -1,8 +1,11 @@
+.git
 **/bin
 **/obj
 **/node_modules
 **/dist
-**/__pycache__
-.git
-.env*
+**/local-state
 **/local.settings.json
+**/.env
+artifacts
+
+.container-secrets

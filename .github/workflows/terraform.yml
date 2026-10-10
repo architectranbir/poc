@@ -7,6 +7,10 @@ on:
         type: choice
         options: [plan, apply]
         default: plan
+      runtime_platform:
+        description: Include private PostgreSQL, ACR and Container Apps environment
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -20,6 +24,8 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
   TF_VAR_location: southindia
+  TF_VAR_enable_runtime_platform: ${{ inputs.runtime_platform }}
+  TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_IN_AUTOMATION: 'true'
   STATE_RG: ${{ vars.TF_STATE_RG }}
   STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}

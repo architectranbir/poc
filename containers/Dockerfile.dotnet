@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG PROJECT=LedgerPilot.Api
+WORKDIR /source
+COPY . .
+RUN dotnet restore src/${PROJECT}/${PROJECT}.csproj --locked-mode -m:1 && dotnet publish src/${PROJECT}/${PROJECT}.csproj -c Release --no-restore -o /publish -m:1
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+ARG PROJECT=LedgerPilot.Api
+WORKDIR /app
+COPY --from=build /publish .
+ENV ASPNETCORE_HTTP_PORTS=8080
+ENV APPLICATION_DLL=${PROJECT}.dll
+USER $APP_UID
+ENTRYPOINT ["sh", "-c", "exec dotnet \"$APPLICATION_DLL\""]

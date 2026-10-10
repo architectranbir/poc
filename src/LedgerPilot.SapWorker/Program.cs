@@ -21,6 +21,18 @@ var transport=Environment.GetEnvironmentVariable("SAP_TRANSPORT") ?? "LocalFiles
 if(transport=="LocalFiles"){
  foreach(var path in Directory.GetFiles(directory,"*.command.json").Order(StringComparer.Ordinal))
  if(!await ProcessFile(path))Environment.ExitCode=1;
+}else if(transport=="Postgres"){
+ if(commandStore is null)throw new InvalidOperationException("Postgres transport requires COMMAND_STORE_CONNECTION");
+ using var stop=new CancellationTokenSource();Console.CancelKeyPress+=(_,e)=>{e.Cancel=true;stop.Cancel();};
+ while(!stop.IsCancellationRequested){
+ foreach(var key in await commandStore.PendingPostings(stop.Token)){
+ var payload=await commandStore.AcceptedPayload(key,stop.Token);
+ if(payload is null)continue;
+ var path=Path.Combine(directory,Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)))+".command.json");
+ await File.WriteAllTextAsync(path,payload,stop.Token);await ProcessFile(path);
+ }
+ try{await Task.Delay(1000,stop.Token);}catch(OperationCanceledException){}
+ }
 }else if(transport=="ServiceBus"){
  if(commandStore is null)throw new InvalidOperationException("ServiceBus requires COMMAND_STORE_CONNECTION");
  var fullyQualifiedNamespace=Environment.GetEnvironmentVariable("SERVICEBUS_NAMESPACE") ?? throw new InvalidOperationException("SERVICEBUS_NAMESPACE required");
@@ -49,7 +61,7 @@ if(transport=="LocalFiles"){
  await processor.StartProcessingAsync();
  try{await Task.Delay(Timeout.Infinite,stop.Token);}catch(OperationCanceledException){}
  await processor.StopProcessingAsync();
-}else throw new InvalidOperationException("SAP_TRANSPORT must be LocalFiles or ServiceBus");
+}else throw new InvalidOperationException("SAP_TRANSPORT must be LocalFiles, Postgres or ServiceBus");
 async Task<bool> ProcessFile(string path){
  var command=JsonSerializer.Deserialize<SapCommand>(await File.ReadAllTextAsync(path),options)??throw new InvalidDataException("Empty command");
  command.Validate();

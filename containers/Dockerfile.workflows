@@ -1,0 +1,7 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+COPY . .
+RUN dotnet restore src/LedgerPilot.Workflows/LedgerPilot.Workflows.csproj --locked-mode -m:1 && dotnet publish src/LedgerPilot.Workflows/LedgerPilot.Workflows.csproj -c Release --no-restore -o /publish -m:1
+FROM mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated10.0
+ENV AzureWebJobsScriptRoot=/home/site/wwwroot
+COPY --from=build /publish /home/site/wwwroot

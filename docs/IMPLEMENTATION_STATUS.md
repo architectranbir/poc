@@ -55,3 +55,8 @@ Compiled smoke exercises exact threshold exemption, threshold plus £0.01, missi
 
 ## Entra API authentication foundation
 JWT bearer validation and a delegated tenant/scope policy now protect all API routes in default Entra mode. Mutation identity derives from oid; project reads are filtered/checked by the mapped identity. LocalDemo requires explicit mode selection and retains loopback/Development constraints. Locked restore and Release build pass; compiled smoke rejects anonymous read/AI/write calls and missing Entra configuration. See ENTRA_SETUP.md for remaining app registration, identity mapping, signed-token and browser tests. This does not make shared deployment ready.
+
+## React Microsoft sign-in
+React now initializes MSAL, presents an explicit Microsoft account selection popup, acquires API tokens silently and supplies bearer headers. Project loading waits for sign-in. Sign-out clears displayed billing state. A dedicated redirect bridge is included as a separate Vite build entry. The dependency and npm lockfile pin MSAL 5.25.0.
+
+Default and Entra-configured production builds were verified; the configured build uses synthetic registration identifiers solely to check compilation/bundling. No real authentication was performed. LocalDemo is explicitly limited to localhost Vite development, with no implicit production fallback. Missing configuration displays a setup message. App registrations, real login/token validation, project object-ID mapping and browser journey tests remain pending.

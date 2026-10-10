@@ -33,13 +33,13 @@ app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
- return Results.Ok(new {project,lines,total=e.Total(lines),findings=e.Findings(project,lines)});
+ return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),findings=e.Findings(project,lines)});
 });
 app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
- var available=e.Total(lines);var gap=req.ProposedAmount-available;
+ var available=s.Position(id,lines).Bill;var gap=req.ProposedAmount-available;
  return Results.Ok(new {available,proposed=req.ProposedAmount,difference=gap,accrualQuestion=gap>10000m,thresholdAssumption="Proposed - Available WIP > 10000. Business sign-off pending.",findings=e.Findings(project,lines),financeApproval=e.RequiresFinanceApproval(project.Unit,req.WriteOff,req.WriteUp)});
 });
 app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest req,BillingStore s,BillingEngine e)=>{
@@ -47,8 +47,8 @@ app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest r
  if(req.Action is not ("POSTPONE" or "WRITE_OFF"))return Results.BadRequest(new {error="Invalid action"});
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  if(!lines.Any(x=>x.Id==req.LineId))return Results.NotFound();
- var result=await s.SaveAdjustment(id,req);
- return Results.Ok(result);
+ try { return Results.Ok(await s.SaveAdjustment(id,req,lines)); }
+ catch(ArgumentException ex) { return Results.BadRequest(new {error=ex.Message}); }
 });
 app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,BillingStore s,BillingEngine e)=>{
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit human intent required"});
@@ -56,7 +56,7 @@ app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,Billin
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  var findings=e.Findings(p,lines);
  if(findings.Any(f=>f.Severity=="BLOCK"))return Results.BadRequest(new {error="Blocking findings",findings});
- var amount=e.Total(lines);var hash=e.Hash(id,amount,req.Narrative);
+ var position=s.Position(id,lines);var amount=position.Bill;var hash=BillingCalculations.FinancialHash(id,position);
  var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey);
  return Results.Ok(doc);
 });
@@ -64,6 +64,8 @@ app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s)=>await s.GetPbd
 app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s)=>{
  var doc=await s.GetPbd(pbdId);if(doc is null)return Results.NotFound();
  if(!req.Confirm||string.IsNullOrEmpty(req.Actor)||req.StateHash!=doc.StateHash||req.Version!=doc.Version)return Results.Conflict(new {error="Approval must match exact PBD version/state and actor"});
+ var currentLines=(await s.Lines()).Where(x=>x.ProjectId==doc.ProjectId).ToList();
+ if(doc.StateHash!=BillingCalculations.FinancialHash(doc.ProjectId,s.Position(doc.ProjectId,currentLines)))return Results.Conflict(new {error="Billing state changed; create and review a new draft"});
  var project=(await s.Projects()).First(p=>p.Id==doc.ProjectId);
  if(!new[]{project.Requestor,project.Manager,project.Partner}.Contains(req.Actor,StringComparer.OrdinalIgnoreCase))return Results.StatusCode(403);
  return Results.Ok(await s.ApprovePbd(pbdId,req.Actor));
@@ -71,6 +73,8 @@ app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,Bil
 app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingStore s)=>{
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit confirmation required"});
  var d=await s.GetPbd(pbdId);if(d is null)return Results.NotFound();if(d.Status=="POSTED")return Results.Ok(d);
+ var currentLines=(await s.Lines()).Where(x=>x.ProjectId==d.ProjectId).ToList();
+ if(d.StateHash!=BillingCalculations.FinancialHash(d.ProjectId,s.Position(d.ProjectId,currentLines)))return Results.Conflict(new {error="Billing state changed; approval invalidated"});
  if(d.Status!="APPROVED")return Results.Conflict(new {error="PBD must be approved before posting"});
  return Results.Ok(await s.PostPbd(pbdId));
 });
@@ -81,7 +85,7 @@ record Project(string Id,string Name,string Unit,string Currency,string BillingC
 record WipLine(string Id,string ProjectId,string Person,string Type,decimal Quantity,decimal Rate,decimal Amount,int AgeDays,bool PlannedChargeable,string Date);
 record Finding(string Rule,string Severity,string Message);
 record ReviewRequest(decimal ProposedAmount,decimal WriteOff=0,decimal WriteUp=0);
-record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm);
+record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm,decimal Amount=0,string? EventId=null);
 record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey);
 record ApproveRequest(string Actor,bool Confirm,string StateHash,int Version);
 record PostRequest(string Actor,bool Confirm);
@@ -103,7 +107,7 @@ class BillingEngine{
  public string Hash(string project,decimal amount,string narrative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{amount:F2}|{narrative}"))).ToLowerInvariant();
 }
 class BillingStore{
- readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly ConcurrentBag<object> adjustments=new();
+ readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly Dictionary<string,List<AdjustmentEvent>> adjustments=new(); readonly object adjustmentLock=new();
  readonly CosmosClient? cosmos;
  public BillingStore(IConfiguration c){cfg=c;
  var endpoint=c["COSMOS_ENDPOINT"];if(!string.IsNullOrWhiteSpace(endpoint))cosmos=new CosmosClient(endpoint,new DefaultAzureCredential());}
@@ -119,7 +123,22 @@ class BillingStore{
  public Task<List<Project>> Projects()=>Load<List<Project>>("projects.json");
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
  async Task Persist(string projectId,string id,object value){if(cosmos is not null){var container=cosmos.GetContainer("ledgerpilot","billing-state");await container.UpsertItemAsync(value,new PartitionKey(projectId));}}
- public async Task<object> SaveAdjustment(string id,AdjustmentRequest req){var ev=new {id=Guid.NewGuid().ToString(),projectId=id,eventType="adjustment",lineId=req.LineId,action=req.Action,actor=req.Actor,reason=req.Reason,at=DateTimeOffset.UtcNow}; adjustments.Add(ev);await Persist(id,ev.id,ev);return ev;}
+ public FinancialPosition Position(string project,List<WipLine> lines){
+ lock(adjustmentLock) return BillingCalculations.Replay(Source(lines),adjustments.GetValueOrDefault(project) ?? []);
+ }
+ static IEnumerable<SourceLine> Source(IEnumerable<WipLine> lines)=>lines.Select(x=>new SourceLine(x.Id,x.Type=="Time"?WipKind.Time:WipKind.Expense,x.Quantity,x.Rate,x.Amount));
+ public async Task<object> SaveAdjustment(string project,AdjustmentRequest req,List<WipLine> lines){
+ if(string.IsNullOrWhiteSpace(req.EventId))throw new ArgumentException("Event ID required for adjustment retries.");
+ AdjustmentEvent ev;
+ lock(adjustmentLock){
+ var existing=adjustments.GetValueOrDefault(project) ?? [];
+ var original=existing.FirstOrDefault(x=>x.EventId==req.EventId);
+ ev=new(req.EventId,req.LineId,req.Action=="POSTPONE"?AdjustmentKind.Postpone:AdjustmentKind.WriteOff,req.Amount,req.Actor,req.Reason,original?.At ?? DateTimeOffset.UtcNow);
+ BillingCalculations.Replay(Source(lines),existing.Append(ev));
+ if(original is null){existing.Add(ev);adjustments[project]=existing;}
+ }
+ await Persist(project,ev.EventId,new {id=ev.EventId,projectId=project,kind="adjustment",ev});return ev;
+ }
  public async Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key){
  if(string.IsNullOrWhiteSpace(key))throw new ArgumentException("Idempotency key required");
  var scope=$"{project}:create:{key}";

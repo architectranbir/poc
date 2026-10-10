@@ -42,4 +42,4 @@ jobs:
           done
       - name: Inspect Terraform lock metadata without reading state contents
         run: |
-          az storage blob show --account-name stlptf7dde6178 --container-name tfstate --name ledgerpilot/poc.tfstate --auth-mode login --query metadata.terraformlockid -o tsv | python3 -c 'import sys,base64; value=sys.stdin.read().strip(); print(base64.b64decode(value).decode() if value else "No state lock")'
+          az storage blob show --account-name stlptf7dde6178 --container-name tfstate --name ledgerpilot/poc.tfstate --auth-mode login --query metadata -o json | python3 -c 'import sys,json,base64; data=json.load(sys.stdin); value=next((v for k,v in data.items() if k.lower()=="terraformlockid"),""); print(base64.b64decode(value).decode() if value else "No state lock")'

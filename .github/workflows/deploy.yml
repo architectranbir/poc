@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/deploy.yml'
       - 'infra/terraform/**'
+      - '.github/workflows/terraform.yml'
 permissions:
   contents: read
   id-token: write

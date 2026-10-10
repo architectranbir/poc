@@ -18,3 +18,8 @@
 The API rejects non-Development startup and non-loopback requests. The deployment script is disabled.
 State-changing endpoints still lack end-user authentication and are a local synthetic demonstration only.
 The financial document's full controls are not yet implemented.
+
+## Submission control domain slice
+The pure SubmissionGate now rejects blocking findings, confirmations with stale dependency hashes, missing or stale exact-state human intent, and required Finance approvals with an incorrect state or role. An unrelated edit can preserve an acknowledgement when its finding dependencies remain unchanged. Ten additional cases verify these decisions (24 domain tests total).
+
+These are domain controls, not completed authenticated API workflows. The current API has not yet integrated this gate. Actor and role inputs must come from validated identity and persisted authorization records before shared deployment. P-09/P-10/P-12/P-17 remain partial until API, persistence and browser acceptance tests pass.

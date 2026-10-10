@@ -37,7 +37,9 @@ jobs:
           path: artifacts/browser
       - name: Show service failures
         if: failure()
-        run: docker compose logs --tail=500
+        run: |
+          docker compose logs workflows
+          docker compose logs --tail=100 api sap worker azurite
       - name: Clean up
         if: always()
         run: docker compose down --volumes

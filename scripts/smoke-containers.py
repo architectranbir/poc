@@ -31,7 +31,9 @@ def workflow_status():
     try:
         with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers),timeout=5) as r:return json.load(r)
     except urllib.error.HTTPError as e:
-        if e.code in (404,500,503):return None
+        if e.code in (404,503):return None
+        if e.code==500:
+            raise AssertionError('Durable endpoint failed: '+e.read().decode()[:2000])
         raise
 for _ in range(120):
     status=workflow_status()

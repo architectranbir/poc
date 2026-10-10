@@ -13,7 +13,7 @@ services:
     volumes: [postgres-data:/var/lib/postgresql/data]
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:3.35.0
-    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --silent
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --silent --skipApiVersionCheck
     volumes: [durable-data:/data]
   api:
     build:
@@ -58,6 +58,7 @@ services:
       dockerfile: containers/Dockerfile.workflows
     environment:
       FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
+      WEBSITE_HOSTNAME: localhost:7071
       AZURE_FUNCTIONS_ENVIRONMENT: Development
       AzureWebJobsSecretStorageType: files
       AzureWebJobsStorage: UseDevelopmentStorage=true;DevelopmentStorageProxyUri=http://azurite

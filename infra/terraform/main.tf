@@ -10,9 +10,9 @@ terraform {
 }
 provider "azurerm" {
   features {}
-  use_oidc                       = true
-  storage_use_azuread            = true
-  resource_providers_to_register = ["Microsoft.App", "Microsoft.DBforPostgreSQL"]
+  use_oidc                        = true
+  storage_use_azuread             = true
+  resource_provider_registrations = "none"
 }
 variable "location" {
   type    = string

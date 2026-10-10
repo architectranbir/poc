@@ -7,12 +7,21 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: azure-poc-plan
     steps:
+      - name: Cancel superseded planning run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh run view 38060282766 --repo "$GITHUB_REPOSITORY" --json status --jq .status)
+          if [ "$state" = "in_progress" ] || [ "$state" = "queued" ]; then
+            gh run cancel 38060282766 --repo "$GITHUB_REPOSITORY"
+          fi
       - uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}

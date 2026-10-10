@@ -1,10 +1,11 @@
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
 
-export const localDemo = import.meta.env.VITE_AUTH_MODE === 'LocalDemo';
+export const hostedDemo = import.meta.env.VITE_AUTH_MODE === 'HostedDemo';
+export const localDemo = hostedDemo || import.meta.env.VITE_AUTH_MODE === 'LocalDemo';
 const clientId = import.meta.env.VITE_ENTRA_CLIENT_ID;
 const tenantId = import.meta.env.VITE_ENTRA_TENANT_ID;
 const scope = import.meta.env.VITE_ENTRA_API_SCOPE;
-export const configurationError = localDemo
+export const configurationError = hostedDemo ? '' : localDemo
   ? (import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) ? '' : 'Local demo requires the development server on localhost.')
   : (!clientId || !tenantId || !scope ? 'Microsoft sign-in has not been configured for this application.' : '');
 const client = !localDemo && !configurationError ? new PublicClientApplication({

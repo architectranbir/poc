@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
-const api='http://localhost:8080';
+const api=process.env.API_URL||'http://localhost:8080';
+const web=process.env.WEB_URL||'http://localhost:5173';
 const projects=await (await fetch(api+'/api/projects')).json();
 let snapshot;
 for(const p of projects){
@@ -16,7 +17,8 @@ const page=await context.newPage();
 const failures=[];
 page.on('pageerror',error=>failures.push(error.message));
 try{
-  await page.goto('http://localhost:5173');
+  await page.goto(web);
+  if(await page.getByRole('button',{name:'Sign in with Microsoft'}).count())throw new Error('Unexpected Entra login');
   await page.getByRole('heading',{name:'Billing workspace'}).waitFor();
   await page.locator('select').first().selectOption(snapshot.project.id);
   await page.waitForFunction(messages=>messages.every(m=>document.body.innerText.includes(m)),snapshot.findings.map(f=>f.message));

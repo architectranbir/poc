@@ -37,7 +37,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       SAP_STATE_PATH: /tmp/sap.json
+      SAP_STATE_CONNECTION: Host=postgres;Username=ledgerpilot;Password=local-demo-only;Database=ledgerpilot
     volumes: [sap-data:/tmp]
+    depends_on:
+      postgres: {condition: service_healthy}
   worker:
     build:
       context: .
@@ -88,6 +91,20 @@ services:
       COMMAND_STORE_CONNECTION: Host=postgres;Username=ledgerpilot;Password=local-demo-only;Database=ledgerpilot
       SERVICEBUS_NAMESPACE: ${SERVICEBUS_NAMESPACE:-}
     depends_on: [api]
+  hosted:
+    profiles: [hosted]
+    build:
+      context: .
+      dockerfile: containers/Dockerfile.demo
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      AUTH_MODE: HostedDemo
+      DEMO_NETWORK_RESTRICTED: 'true'
+      COMMAND_STORE_CONNECTION: Host=postgres;Username=ledgerpilot;Password=local-demo-only;Database=ledgerpilot
+    ports: ['127.0.0.1:8088:8080']
+    depends_on:
+      postgres: {condition: service_healthy}
+
 volumes:
   postgres-data:
   sap-data:

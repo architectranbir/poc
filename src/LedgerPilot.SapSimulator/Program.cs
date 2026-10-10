@@ -1,7 +1,8 @@
 using LedgerPilot.Domain;
+using LedgerPilot.Persistence;
 using System.Text.Json;
 var builder=WebApplication.CreateBuilder(args);
-if(!builder.Environment.IsDevelopment())throw new InvalidOperationException("Simulator is local Development only until service authentication is configured.");
+if(!builder.Environment.IsDevelopment() && builder.Configuration["SYNTHETIC_HOSTED_DEMO"]!="true")throw new InvalidOperationException("Simulator is local Development only until service authentication is configured.");
 builder.Services.AddSingleton<SimulatorStore>();
 var app=builder.Build();
 app.Services.GetRequiredService<SimulatorStore>();
@@ -22,18 +23,28 @@ record SapDocument(string Id,CreateDocument Request,string Status,string? Postin
 record SimulatorSnapshot(int Schema,Dictionary<string,SapDocument> Documents,Dictionary<string,string> Commands);
 class CommandConflict(string message):Exception(message);
 class SimulatorStore:IDisposable{
- readonly object gate=new();readonly string path;readonly FileStream owner;
+ readonly object gate=new();readonly string? path;readonly FileStream? owner;readonly SimulatorSnapshotStore? database;
  Dictionary<string,SapDocument> documents=new();Dictionary<string,string> commands=new();
  public SimulatorStore(IConfiguration cfg){
+ string? raw;
+ if(!string.IsNullOrWhiteSpace(cfg["SAP_STATE_CONNECTION"])){
+ database=new SimulatorSnapshotStore(cfg["SAP_STATE_CONNECTION"]!);raw=database.Load();
+ }else{
  path=Path.GetFullPath(cfg["SAP_STATE_PATH"]??Path.Combine(AppContext.BaseDirectory,"local-state","sap.json"));
  Directory.CreateDirectory(Path.GetDirectoryName(path)!);owner=new(path+".lock",FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
- if(File.Exists(path)){
- var saved=JsonSerializer.Deserialize<SimulatorSnapshot>(File.ReadAllText(path))??throw new InvalidDataException("Empty simulator state");
+ raw=File.Exists(path)?File.ReadAllText(path):null;
+ }
+ if(raw is not null){
+ var saved=JsonSerializer.Deserialize<SimulatorSnapshot>(raw)??throw new InvalidDataException("Empty simulator state");
  if(saved.Schema!=1||saved.Commands.Values.Any(id=>!saved.Documents.ContainsKey(id)))throw new InvalidDataException("Invalid simulator state");
  documents=saved.Documents;commands=saved.Commands;
  }}
- public void Dispose()=>owner.Dispose();
- void Save(){using(var stream=new FileStream(path+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,new SimulatorSnapshot(1,documents,commands));stream.Flush(true);}File.Move(path+".tmp",path,true);}
+ public void Dispose(){owner?.Dispose();database?.Dispose();}
+ void Save(){
+ var snapshot=new SimulatorSnapshot(1,documents,commands);
+ if(database is not null){database.Save(JsonSerializer.Serialize(snapshot));return;}
+ using(var stream=new FileStream(path+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,snapshot);stream.Flush(true);}File.Move(path+".tmp",path!,true);
+ }
  static void ValidateKey(string key){if(string.IsNullOrWhiteSpace(key)||key.Length>128)throw new ArgumentException("Command key must contain 1–128 characters");}
  public SapDocument Create(CreateDocument request){lock(gate){
  ValidateKey(request.CommandKey);

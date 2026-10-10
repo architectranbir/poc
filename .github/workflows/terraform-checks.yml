@@ -21,3 +21,9 @@ jobs:
       - run: terraform fmt -check
       - run: terraform init -backend=false -lockfile=readonly
       - run: terraform validate
+      - run: terraform fmt -check
+        working-directory: infra/bootstrap
+      - run: terraform init -backend=false -lockfile=readonly
+        working-directory: infra/bootstrap
+      - run: terraform validate
+        working-directory: infra/bootstrap

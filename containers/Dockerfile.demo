@@ -1,0 +1,18 @@
+FROM node:22-alpine AS web
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+ENV VITE_AUTH_MODE=HostedDemo
+RUN npm run build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+COPY . .
+RUN dotnet restore src/LedgerPilot.Api/LedgerPilot.Api.csproj --locked-mode -m:1 && dotnet publish src/LedgerPilot.Api/LedgerPilot.Api.csproj -c Release --no-restore -o /publish -m:1
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /publish .
+COPY --from=web /web/dist ./wwwroot
+ENV ASPNETCORE_HTTP_PORTS=8080
+USER $APP_UID
+ENTRYPOINT ["dotnet", "LedgerPilot.Api.dll"]

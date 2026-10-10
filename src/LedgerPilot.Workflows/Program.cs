@@ -6,7 +6,7 @@ using Npgsql;
 
 var host = new HostBuilder().ConfigureFunctionsWorkerDefaults()
     .ConfigureServices(services => {
-        if (Environment.GetEnvironmentVariable("AZURE_FUNCTIONS_ENVIRONMENT") != "Development")
+        if (Environment.GetEnvironmentVariable("AZURE_FUNCTIONS_ENVIRONMENT") != "Development" && Environment.GetEnvironmentVariable("SYNTHETIC_HOSTED_DEMO") != "true")
             throw new InvalidOperationException("Workflow host is restricted to Development until deployment hardening is complete.");
         services.AddSingleton(_ => NpgsqlDataSource.Create(Environment.GetEnvironmentVariable("COMMAND_STORE_CONNECTION")
             ?? throw new InvalidOperationException("COMMAND_STORE_CONNECTION required.")));

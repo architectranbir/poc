@@ -15,12 +15,13 @@ using Azure.AI.Projects;
 using LedgerPilot.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
-// This inherited scaffold has no end-user authentication yet. Fail closed for
-// hosted environments until the authenticated workflow replaces it.
-if (!builder.Environment.IsDevelopment())
- throw new InvalidOperationException("Local development baseline only. Entra authentication and durable gates are required before deployment.");
 var authMode=builder.Configuration["AUTH_MODE"] ?? "Entra";
-if(authMode is not ("Entra" or "LocalDemo"))throw new InvalidOperationException("AUTH_MODE must be Entra or LocalDemo");
+var hostedDemo=authMode=="HostedDemo";
+if(hostedDemo && (builder.Configuration["DEMO_NETWORK_RESTRICTED"]!="true" || string.IsNullOrWhiteSpace(builder.Configuration["COMMAND_STORE_CONNECTION"])))
+ throw new InvalidOperationException("Hosted demo requires restricted ingress and PostgreSQL persistence.");
+if (!builder.Environment.IsDevelopment() && !hostedDemo)
+ throw new InvalidOperationException("Local development baseline only. Entra authentication and durable gates are required before deployment.");
+if(authMode is not ("Entra" or "LocalDemo" or "HostedDemo"))throw new InvalidOperationException("AUTH_MODE must be Entra, LocalDemo or HostedDemo");
 if(authMode=="Entra"){
  var tenant=builder.Configuration["ENTRA_TENANT_ID"];
  var audience=builder.Configuration["ENTRA_API_AUDIENCE"];
@@ -42,15 +43,16 @@ var app=builder.Build();
 app.Services.GetRequiredService<BillingStore>();
 app.Use(async (context, next) => {
  var remote = context.Connection.RemoteIpAddress;
- if (!LocalNetwork.Allows(remote,builder.Configuration["LOCAL_CONTAINER_MODE"]=="true")) {
+ if (!hostedDemo && !LocalNetwork.Allows(remote,builder.Configuration["LOCAL_CONTAINER_MODE"]=="true")) {
    context.Response.StatusCode = 403; return;
  }
  await next(context);
 });
 app.UseCors();
+if(hostedDemo){app.UseDefaultFiles();app.UseStaticFiles();}
 if(authMode=="Entra"){app.UseAuthentication();app.UseAuthorization();}
 app.MapGet("/health",()=>Results.Ok(new { status="ok", environment="SYNTHETIC SAP SANDBOX" })).AllowAnonymous();
-app.MapGet("/api/projects",async (BillingStore s,HttpContext context)=>Results.Ok((await s.Projects()).Where(p=>authMode=="LocalDemo"||ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))));
+app.MapGet("/api/projects",async (BillingStore s,HttpContext context)=>Results.Ok((await s.Projects()).Where(p=>authMode is "LocalDemo" or "HostedDemo"||ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))));
 app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine e,HttpContext context)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
@@ -202,6 +204,7 @@ app.MapPost("/api/ai/explain",async(AiRequest req,AiAssistant ai,BillingStore st
  financialHash=BillingCalculations.FinancialHash(project.Id,position),findings=engine.Findings(project,lines)});
  return Results.Ok(new {text=await ai.Explain(req,facts)});
 });
+if(hostedDemo)app.MapFallbackToFile("index.html");
 app.Run();
 
 static class ProjectRoles {

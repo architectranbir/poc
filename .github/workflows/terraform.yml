@@ -11,6 +11,14 @@ on:
         description: Include private PostgreSQL, ACR and Container Apps environment
         type: boolean
         default: false
+      workloads:
+        description: Deploy the published demo, SAP worker, dispatcher and Durable containers
+        type: boolean
+        default: false
+      image_tag:
+        description: Published image commit SHA
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -23,7 +31,10 @@ env:
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
-  TF_VAR_location: southindia
+  TF_VAR_location: ${{ vars.AZURE_REGION || 'southindia' }}
+  TF_VAR_enable_workloads: ${{ inputs.workloads }}
+  TF_VAR_image_tag: ${{ inputs.image_tag }}
+  TF_VAR_demo_allowed_ipv4_cidrs: ${{ vars.DEMO_ALLOWED_IPV4_CIDRS || '[]' }}
   TF_VAR_enable_runtime_platform: ${{ inputs.runtime_platform }}
   TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
   TF_IN_AUTOMATION: 'true'
@@ -93,4 +104,32 @@ jobs:
           -backend-config="storage_account_name=$STATE_ACCOUNT"
           -backend-config="container_name=$STATE_CONTAINER"
           -backend-config="key=ledgerpilot/poc.tfstate"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Release single-writer containers for replacement
+        if: inputs.workloads
+        run: |
+          group="rg-ledgerpilot-$TF_VAR_name_suffix"
+          for service in demo sap dispatcher workflows; do
+            app="ledgerpilot-$TF_VAR_name_suffix-$service"
+            if az containerapp show --resource-group "$group" --name "$app" >/dev/null 2>&1; then
+              for revision in $(az containerapp revision list --resource-group "$group" --name "$app" --query '[?properties.active].name' -o tsv); do
+                az containerapp revision deactivate --resource-group "$group" --name "$app" --revision "$revision"
+              done
+            fi
+          done
       - run: terraform apply -input=false -lock-timeout=5m tfplan
+      - name: Activate current demo revisions
+        if: always() && inputs.workloads
+        run: |
+          group="rg-ledgerpilot-$TF_VAR_name_suffix"
+          for service in demo sap dispatcher workflows; do
+            app="ledgerpilot-$TF_VAR_name_suffix-$service"
+            if az containerapp show --resource-group "$group" --name "$app" >/dev/null 2>&1; then
+              revision=$(az containerapp show --resource-group "$group" --name "$app" --query properties.latestRevisionName -o tsv)
+              az containerapp revision activate --resource-group "$group" --name "$app" --revision "$revision"
+            fi
+          done

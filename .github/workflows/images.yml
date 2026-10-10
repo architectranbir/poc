@@ -34,15 +34,7 @@ jobs:
           done
           docker build -f containers/Dockerfile.workflows -t "$ACR_SERVER/ledgerpilot-workflows:$GITHUB_SHA" .
           docker push "$ACR_SERVER/ledgerpilot-workflows:$GITHUB_SHA"
-      - name: Publish authenticated React image
-        env:
-          VITE_ENTRA_CLIENT_ID: ${{ vars.ENTRA_WEB_CLIENT_ID }}
-          VITE_ENTRA_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          VITE_ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE }}
-          VITE_API_URL: ${{ vars.API_PUBLIC_URL }}
+      - name: Publish demo application without Entra sign-in
         run: |
-          for name in VITE_ENTRA_CLIENT_ID VITE_ENTRA_TENANT_ID VITE_ENTRA_API_SCOPE VITE_API_URL; do
-            test -n "${!name}" || exit 1
-          done
-          docker build -f containers/Dockerfile.web --target production --build-arg VITE_ENTRA_CLIENT_ID --build-arg VITE_ENTRA_TENANT_ID --build-arg VITE_ENTRA_API_SCOPE --build-arg VITE_API_URL -t "$ACR_SERVER/ledgerpilot-web:$GITHUB_SHA" .
-          docker push "$ACR_SERVER/ledgerpilot-web:$GITHUB_SHA"
+          docker build -f containers/Dockerfile.demo -t "$ACR_SERVER/ledgerpilot-demo:$GITHUB_SHA" .
+          docker push "$ACR_SERVER/ledgerpilot-demo:$GITHUB_SHA"

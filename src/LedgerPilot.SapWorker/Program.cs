@@ -6,7 +6,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-if(Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")!="Development")throw new InvalidOperationException("Local worker transport requires Development");
+if(Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")!="Development" && Environment.GetEnvironmentVariable("SYNTHETIC_HOSTED_DEMO")!="true")throw new InvalidOperationException("Local worker transport requires Development");
 var endpoint=new Uri(Environment.GetEnvironmentVariable("SAP_SIMULATOR_URL")??"http://127.0.0.1:8090");
 if(!endpoint.IsLoopback||endpoint.Scheme!="http")throw new InvalidOperationException("Local simulator URL required");
 var directory=Path.GetFullPath(Environment.GetEnvironmentVariable("SAP_COMMAND_PATH")??"local-state/sap-commands");

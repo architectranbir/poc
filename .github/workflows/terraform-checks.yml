@@ -1,0 +1,23 @@
+name: Terraform checks
+on:
+  pull_request:
+    paths: ['infra/**', '.github/workflows/terraform*.yml']
+  push:
+    branches: [main, 'feat/**']
+    paths: ['infra/**', '.github/workflows/terraform*.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+      - run: terraform fmt -check
+      - run: terraform init -backend=false -lockfile=readonly
+      - run: terraform validate

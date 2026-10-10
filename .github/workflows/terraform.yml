@@ -1,0 +1,90 @@
+name: Terraform Azure foundation
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Plan only or apply this run's saved plan
+        type: choice
+        options: [plan, apply]
+        default: plan
+permissions:
+  contents: read
+concurrency:
+  group: terraform-azure-poc
+  cancel-in-progress: false
+env:
+  ARM_USE_OIDC: 'true'
+  ARM_USE_AZUREAD: 'true'
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_name_suffix: ${{ vars.AZURE_NAME_SUFFIX }}
+  TF_VAR_location: southindia
+  TF_IN_AUTOMATION: 'true'
+  STATE_RG: ${{ vars.TF_STATE_RG }}
+  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
+  STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: azure-poc-plan
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+      - name: Check required configuration
+        run: |
+          for name in ARM_CLIENT_ID ARM_TENANT_ID ARM_SUBSCRIPTION_ID TF_VAR_name_suffix STATE_RG STATE_ACCOUNT STATE_CONTAINER; do
+            if [ -z "${!name}" ]; then echo "Missing configuration: $name"; exit 1; fi
+          done
+      - run: terraform fmt -check
+      - name: Initialize OIDC remote state
+        run: >-
+          terraform init -lockfile=readonly
+          -backend-config="resource_group_name=$STATE_RG"
+          -backend-config="storage_account_name=$STATE_ACCOUNT"
+          -backend-config="container_name=$STATE_CONTAINER"
+          -backend-config="key=ledgerpilot/poc.tfstate"
+      - run: terraform validate
+      - run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ github.sha }}
+          path: infra/terraform/tfplan
+          retention-days: 1
+  apply:
+    if: inputs.action == 'apply'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: azure-poc-apply
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+      - uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${{ github.sha }}
+          path: infra/terraform
+      - name: Initialize OIDC remote state
+        run: >-
+          terraform init -lockfile=readonly
+          -backend-config="resource_group_name=$STATE_RG"
+          -backend-config="storage_account_name=$STATE_ACCOUNT"
+          -backend-config="container_name=$STATE_CONTAINER"
+          -backend-config="key=ledgerpilot/poc.tfstate"
+      - run: terraform apply -input=false -lock-timeout=5m tfplan

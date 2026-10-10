@@ -53,6 +53,11 @@ def run():
                     time.sleep(0.1)
             projects = request("/api/projects")
             assert len(projects) == 5
+            fixed = request("/api/projects/CU33924501P01/fixed-price-preview", {"cutoff": "2026-10-10", "milestoneIds": ["FP-02"]})
+            assert fixed["position"]["proposedBill"] == 20000
+            assert fixed["position"]["remainingContract"] == 40000
+            for selected in [["FP-01"], ["FP-03"], ["unknown"], ["FP-02", "FP-02"]]:
+                request("/api/projects/CU33924501P01/fixed-price-preview", {"cutoff": "2026-10-10", "milestoneIds": selected}, expected=400)
             request("/api/projects/not-a-project/wip", expected=404)
             # Choose a synthetic project that has no hard findings in the inherited subset.
             snapshot = next(s for s in (request(f"/api/projects/{p['id']}/wip") for p in projects)

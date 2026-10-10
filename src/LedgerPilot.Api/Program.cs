@@ -56,6 +56,14 @@ app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=e.StateHash(project,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
 });
+app.MapPost("/api/projects/{id}/fixed-price-preview",async(string id,FixedPriceRequest req,BillingStore s,HttpContext context)=>{
+ var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
+ var schedule=(await s.FixedPriceSchedules()).FirstOrDefault(x=>x.ProjectId==id);
+ if(schedule is null)return Results.NotFound(new {error="No synthetic fixed-price schedule for this project"});
+ try{return Results.Ok(new {position=FixedPriceCalculations.Calculate(schedule.ContractValue,schedule.PreviouslyBilled,req.Cutoff,schedule.Milestones,req.MilestoneIds ?? []),currency=p.Currency,policy="Synthetic milestone schedule; preview only",draftIntegration="Fixed-price draft creation remains pending"});}
+ catch(ArgumentException ex){return Results.BadRequest(new {error=ex.Message});}
+});
 app.MapGet("/api/projects/{id}/commercial-preview",async(string id,BillingStore s,HttpContext context)=>{
  var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
  if(authMode=="Entra"&&!ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
@@ -184,6 +192,8 @@ record Project(string Id,string Name,string Unit,string Currency,string BillingC
 record WipLine(string Id,string ProjectId,string Person,string Type,decimal Quantity,decimal Rate,decimal Amount,int AgeDays,bool PlannedChargeable,string Date);
 record Finding(string Rule,string Severity,string Message,string Id="",string DependencyHash="");
 record AcknowledgementInput(string FindingId,string DependencyHash);
+record FixedPriceRequest(DateOnly Cutoff,string[]? MilestoneIds);
+record FixedPriceSchedule(string ProjectId,decimal ContractValue,decimal PreviouslyBilled,BillingMilestone[] Milestones);
 record WriteUpRequest(string EventId,decimal Amount,string Actor,string Reason,bool Confirm);
 record WriteUpEvent(string EventId,decimal Amount,string Actor,string Reason,DateTimeOffset At);
 record FinanceApprovalRequest(string Actor,bool Confirm,string StateHash);
@@ -244,6 +254,7 @@ class BillingStore : IDisposable{
  var path=Path.Combine(basePath,file);return JsonSerializer.Deserialize<T>(await File.ReadAllTextAsync(path),new JsonSerializerOptions{PropertyNameCaseInsensitive=true})!;
  }
  public Task<List<Project>> Projects()=>Load<List<Project>>("projects.json");
+ public Task<List<FixedPriceSchedule>> FixedPriceSchedules()=>Load<List<FixedPriceSchedule>>("fixed-price-schedules.json");
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
  public void Dispose(){processLock.Dispose();}
  void SaveLocal(){

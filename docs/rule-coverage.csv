@@ -14,17 +14,17 @@ A-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 A-03,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 A-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 V-01,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-V-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-02,PARTIAL,Decimal currency/VAT preview tested; draft commercial integration pending
 V-03,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-V-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-V-05,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-04,PARTIAL,Decimal currency/VAT preview tested; draft commercial integration pending
+V-05,PARTIAL,Decimal currency/VAT preview tested; draft commercial integration pending
 V-06,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 V-07,PARTIAL,Email/PO presence
 V-08,PARTIAL,Member-firm missing end client
 V-09,PARTIAL,Member-firm receiving code
 V-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 V-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-V-12,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-12,PARTIAL,Decimal currency/VAT preview tested; draft commercial integration pending
 P-01,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 P-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 P-03,PARTIAL,Tax & Legal threshold check

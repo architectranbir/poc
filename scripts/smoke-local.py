@@ -57,6 +57,10 @@ def run():
             snapshot = next(s for s in (request(f"/api/projects/{p['id']}/wip") for p in projects)
                             if not any(f["severity"] == "BLOCK" for f in s["findings"]))
             p = snapshot["project"]
+            commercial = request(f"/api/projects/{p['id']}/commercial-preview")
+            assert Decimal(str(commercial["preview"]["gross"])) == Decimal(str(commercial["preview"]["billingNet"])) + Decimal(str(commercial["preview"]["vat"]))
+            assert commercial["preview"]["exchangeRate"]["source"].startswith("Synthetic")
+            request("/api/projects/not-a-project/commercial-preview", expected=404)
             request(f"/api/projects/{p['id']}/adjustments",
                     {"lineId": snapshot["lines"][0]["id"], "action": "WRITE_OFF",
                      "actor": p["requestor"], "reason": "test", "confirm": False}, expected=400)

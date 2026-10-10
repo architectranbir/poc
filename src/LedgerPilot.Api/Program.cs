@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,6 +17,20 @@ var builder = WebApplication.CreateBuilder(args);
 // hosted environments until the authenticated workflow replaces it.
 if (!builder.Environment.IsDevelopment())
  throw new InvalidOperationException("Local development baseline only. Entra authentication and durable gates are required before deployment.");
+var authMode=builder.Configuration["AUTH_MODE"] ?? "Entra";
+if(authMode is not ("Entra" or "LocalDemo"))throw new InvalidOperationException("AUTH_MODE must be Entra or LocalDemo");
+if(authMode=="Entra"){
+ var tenant=builder.Configuration["ENTRA_TENANT_ID"];
+ var audience=builder.Configuration["ENTRA_API_AUDIENCE"];
+ if(!Guid.TryParse(tenant,out _)||string.IsNullOrWhiteSpace(audience))throw new InvalidOperationException("Entra tenant ID and API audience required");
+ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o=>{
+ o.Authority=$"https://login.microsoftonline.com/{tenant}/v2.0";o.Audience=audience;o.MapInboundClaims=false;
+ o.TokenValidationParameters=new TokenValidationParameters{ValidateIssuer=true,ValidateAudience=true,ValidateLifetime=true,ValidateIssuerSigningKey=true,RequireSignedTokens=true,RequireExpirationTime=true,ClockSkew=TimeSpan.FromMinutes(1)};
+ });
+ builder.Services.AddAuthorization(o=>o.FallbackPolicy=new AuthorizationPolicyBuilder().RequireAuthenticatedUser()
+ .RequireClaim("tid",tenant!).RequireClaim("oid").RequireAssertion(c=>
+ (c.User.FindFirst("scp")?.Value.Split(' ',StringSplitOptions.RemoveEmptyEntries) ?? []).Contains("Billing.Access",StringComparer.Ordinal)).Build());
+}
 builder.Services.AddCors(o=>o.AddDefaultPolicy(p=>p.WithOrigins(builder.Configuration["WEB_ORIGIN"]??"http://localhost:5173").AllowAnyMethod().AllowAnyHeader()));
 builder.Services.AddSingleton<BillingStore>();
 builder.Services.AddSingleton<BillingEngine>();
@@ -29,22 +46,26 @@ app.Use(async (context, next) => {
  await next(context);
 });
 app.UseCors();
-app.MapGet("/health",()=>Results.Ok(new { status="ok", environment="SYNTHETIC SAP SANDBOX" }));
-app.MapGet("/api/projects",async (BillingStore s)=>Results.Ok(await s.Projects()));
-app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine e)=>{
+if(authMode=="Entra"){app.UseAuthentication();app.UseAuthorization();}
+app.MapGet("/health",()=>Results.Ok(new { status="ok", environment="SYNTHETIC SAP SANDBOX" })).AllowAnonymous();
+app.MapGet("/api/projects",async (BillingStore s,HttpContext context)=>Results.Ok((await s.Projects()).Where(p=>authMode=="LocalDemo"||ProjectRoles.CanRead(p,context.User.FindFirst("oid")?.Value))));
+app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine e,HttpContext context)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=BillingCalculations.FinancialHash(id,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
 });
-app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e)=>{
+app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  var available=s.Position(id,lines).Bill;var gap=req.ProposedAmount-available;
  return Results.Ok(new {available,proposed=req.ProposedAmount,difference=gap,accrualQuestion=gap>10000m,thresholdAssumption="Proposed - Available WIP > 10000. Business sign-off pending.",findings=e.Findings(project,lines),financeApproval=e.RequiresFinanceApproval(project.Unit,req.WriteOff,req.WriteUp)});
 });
-app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest req,BillingStore s,BillingEngine e)=>{
+app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  if(req.Actor is null || req.Actor.Length<2 || req.Confirm!=true)return Results.BadRequest(new {error="Actor and explicit confirmation required."});
  if(req.Action is not ("POSTPONE" or "WRITE_OFF"))return Results.BadRequest(new {error="Invalid action"});
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
@@ -55,7 +76,8 @@ app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest r
  try { return Results.Ok(await s.SaveAdjustment(id,req,lines)); }
  catch(ArgumentException ex) { return Results.BadRequest(new {error=ex.Message}); }
 });
-app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprovalRequest req,BillingStore s)=>{
+app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprovalRequest req,BillingStore s,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(project is null)return Results.NotFound();
  if(!req.Confirm)return Results.BadRequest(new {error="Explicit Finance confirmation required"});
  if(string.IsNullOrWhiteSpace(project.FinanceApprover)||!string.Equals(project.FinanceApprover,req.Actor,StringComparison.OrdinalIgnoreCase))return Results.StatusCode(403);
@@ -64,7 +86,8 @@ app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprova
  if(req.StateHash!=hash)return Results.Conflict(new {error="Finance approval state is stale"});
  return Results.Ok(s.SaveFinanceApproval(id,new StateApproval(hash,req.Actor,"Finance")));
 });
-app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,BillingStore s,BillingEngine e)=>{
+app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit human intent required"});
  var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
  if(!ProjectRoles.CanBill(p,req.Actor))return Results.StatusCode(403);
@@ -80,8 +103,14 @@ app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,Billin
  var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey,req.Acknowledgements ?? []);
  return Results.Ok(doc);
 });
-app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s)=>await s.GetPbd(pbdId) is {} doc?Results.Ok(doc):Results.NotFound());
-app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s)=>{
+app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s,HttpContext context)=>{
+ var doc=await s.GetPbd(pbdId);if(doc is null)return Results.NotFound();
+ var project=(await s.Projects()).First(p=>p.Id==doc.ProjectId);
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
+ return Results.Ok(doc);
+});
+app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var doc=await s.GetPbd(pbdId);if(doc is null)return Results.NotFound();
  if(!req.Confirm||string.IsNullOrEmpty(req.Actor)||req.StateHash!=doc.StateHash||req.Version!=doc.Version)return Results.Conflict(new {error="Approval must match exact PBD version/state and actor"});
  var currentLines=(await s.Lines()).Where(x=>x.ProjectId==doc.ProjectId).ToList();
@@ -90,7 +119,8 @@ app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,Bil
  if(!ProjectRoles.CanBill(project,req.Actor))return Results.StatusCode(403);
  return Results.Ok(await s.ApprovePbd(pbdId,req.Actor));
 });
-app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingStore s)=>{
+app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingStore s,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit confirmation required"});
  var d=await s.GetPbd(pbdId);if(d is null)return Results.NotFound();
  var project=(await s.Projects()).First(p=>p.Id==d.ProjectId);
@@ -101,11 +131,12 @@ app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingSt
  if(d.Status!="APPROVED")return Results.Conflict(new {error="PBD must be approved before posting"});
  return Results.Ok(await s.PostPbd(pbdId));
 });
-app.MapPost("/api/ai/explain",async(AiRequest req,AiAssistant ai,BillingStore store,BillingEngine engine)=>{
+app.MapPost("/api/ai/explain",async(AiRequest req,AiAssistant ai,BillingStore store,BillingEngine engine,HttpContext context)=>{
  if(string.IsNullOrWhiteSpace(req.UserMessage)||req.UserMessage.Length>4000)return Results.BadRequest(new {error="Message must contain 1 to 4000 characters"});
  if(!string.IsNullOrWhiteSpace(req.Facts))return Results.BadRequest(new {error="Caller-supplied billing facts are not accepted"});
  var project=(await store.Projects()).FirstOrDefault(p=>p.Id==req.ProjectId);
  if(project is null)return Results.NotFound();
+ if(authMode=="Entra"&&!ProjectRoles.CanRead(project,context.User.FindFirst("oid")?.Value))return Results.StatusCode(403);
  var lines=(await store.Lines()).Where(x=>x.ProjectId==project.Id).ToList();
  var position=store.Position(project.Id,lines);
  var facts=JsonSerializer.Serialize(new {projectId=project.Id,currency=project.Currency,
@@ -121,6 +152,7 @@ app.MapPost("/api/ai/explain",async(AiRequest req,AiAssistant ai,BillingStore st
 app.Run();
 
 static class ProjectRoles {
+ public static bool CanRead(Project project,string? actor)=>CanBill(project,actor)||(!string.IsNullOrWhiteSpace(actor)&&!string.IsNullOrWhiteSpace(project.FinanceApprover)&&string.Equals(actor,project.FinanceApprover,StringComparison.OrdinalIgnoreCase));
  public static bool CanBill(Project project,string? actor)=>!string.IsNullOrWhiteSpace(actor)&&
  new[]{project.Requestor,project.Manager,project.Partner}.Any(x=>!string.IsNullOrWhiteSpace(x)&&string.Equals(x,actor,StringComparison.OrdinalIgnoreCase));
 }

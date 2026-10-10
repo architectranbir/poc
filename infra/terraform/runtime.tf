@@ -38,6 +38,13 @@ resource "azurerm_subnet" "containers" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.runtime[0].name
   address_prefixes     = ["10.42.0.0/23"]
+  delegation {
+    name = "containerapps"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
   lifecycle {
     replace_triggered_by = [azurerm_virtual_network.runtime[0].location]
   }

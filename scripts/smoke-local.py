@@ -153,6 +153,28 @@ def run():
             request("/api/ai/explain", {"userMessage": "Explain", "projectId": "not-a-project"}, expected=404)
             request("/api/ai/explain", {"userMessage": "x" * 4001, "projectId": p["id"]}, expected=400)
             request("/api/ai/explain", {"userMessage": " ", "projectId": p["id"]}, expected=400)
+            bulk_project = next(x for x in projects if x['id'] != p['id'] and x['id'] != alternate['id'])
+            bulk_path = f"/api/projects/{bulk_project['id']}"
+            bulk_before = request(bulk_path+'/wip')
+            selections = [{'lineId': x['lineId'], 'amount': 1} for x in bulk_before['position']['lines'] if x['bill'] >= 1][:2]
+            assert len(selections) == 2
+            batch = dict(batchId='94876cd5-d377-4d43-a7b1-d0c73808172d', action='POSTPONE', actor=bulk_project['requestor'], reason='Synthetic batch review', confirm=True, stateHash=bulk_before['financialHash'], items=selections)
+            request(bulk_path+'/adjustments/bulk', dict(batch, actor='unrelated-user'), expected=403)
+            request(bulk_path+'/adjustments/bulk', dict(batch, confirm=False), expected=400)
+            request(bulk_path+'/adjustments/bulk', dict(batch, stateHash='stale'), expected=409)
+            request(bulk_path+'/adjustments/bulk', dict(batch, items=[selections[0], dict(selections[1], amount=100000000)]), expected=400)
+            assert request(bulk_path+'/wip')['total'] == bulk_before['total']
+            assert request(bulk_path+'/adjustments') == []
+            assert not request(bulk_path+'/adjustments/bulk', batch)['replayed']
+            assert request(bulk_path+'/adjustments/bulk', batch)['replayed']
+            request(bulk_path+'/adjustments/bulk', dict(batch, items=selections[:1]), expected=400)
+            bulk_after = request(bulk_path+'/wip')
+            assert bulk_after['total'] == bulk_before['total'] - 2
+            batch_audit = request(bulk_path+'/adjustments')
+            assert len(batch_audit) == 2
+            assert all(x['before']['bill']-x['after']['bill'] == 1 for x in batch_audit)
+            assert all(x['reason'] == batch['reason'] and x['actor'] == batch['actor'] for x in batch_audit)
+            print('PASS: atomic bulk adjustments, stale state, authorisation, retry and audit')
             api.terminate()
             api.wait(timeout=5)
             with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,
@@ -167,6 +189,9 @@ def run():
                             if recovered.poll() is not None or time.monotonic() >= deadline:
                                 raise RuntimeError("Recovery startup failed")
                             time.sleep(0.1)
+                    assert request(bulk_path+'/adjustments/bulk', batch)['replayed']
+                    assert request(bulk_path+'/wip')['total'] == bulk_after['total']
+                    assert request(bulk_path+'/adjustments') == batch_audit
                     restored = request(f"/api/projects/{p['id']}/wip")
                     assert restored["total"] == snapshot["total"] - 2
                     restored_audit = request(f"/api/projects/{p['id']}/adjustments")

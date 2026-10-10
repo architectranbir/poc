@@ -104,6 +104,17 @@ app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest r
  try { return Results.Ok(await s.SaveAdjustment(id,req,lines)); }
  catch(ArgumentException ex) { return Results.BadRequest(new {error=ex.Message}); }
 });
+app.MapPost("/api/projects/{id}/adjustments/bulk",async(string id,BulkAdjustmentRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
+ if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
+ if(!req.Confirm || req.Items is null)return Results.BadRequest(new {error="Explicit batch confirmation and selections required."});
+ var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(project is null)return Results.NotFound();
+ if(!ProjectRoles.CanBill(project,req.Actor))return Results.StatusCode(403);
+ if(req.Action is not ("POSTPONE" or "WRITE_OFF"))return Results.BadRequest(new {error="Invalid action"});
+ var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
+ try{return Results.Ok(s.SaveBatch(project,req,lines,e));}
+ catch(StaleAdjustmentStateException ex){return Results.Conflict(new {error=ex.Message});}
+ catch(ArgumentException ex){return Results.BadRequest(new {error=ex.Message});}
+});
 app.MapPost("/api/projects/{id}/write-ups",async(string id,WriteUpRequest req,BillingStore s,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(project is null)return Results.NotFound();
@@ -209,6 +220,7 @@ record WriteUpEvent(string EventId,decimal Amount,string Actor,string Reason,Dat
 record FinanceApprovalRequest(string Actor,bool Confirm,string StateHash);
 record ReviewRequest(decimal ProposedAmount,decimal WriteOff=0,decimal WriteUp=0);
 record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm,decimal Amount=0,string? EventId=null);
+record BulkAdjustmentRequest(string BatchId,string Action,string Actor,string Reason,bool Confirm,string StateHash,AdjustmentSelection[]? Items);
 record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey,AcknowledgementInput[]? Acknowledgements=null,bool VatConfirmed=false,bool CurrencyConfirmed=false);
 record ApproveRequest(string Actor,bool Confirm,string StateHash,int Version);
 record PostRequest(string Actor,bool Confirm);
@@ -323,6 +335,29 @@ class BillingStore : IDisposable{
  lock(adjustmentLock) return BillingCalculations.Replay(Source(lines),adjustments.GetValueOrDefault(project) ?? [],(writeUps.GetValueOrDefault(project) ?? []).Sum(x=>x.Amount));
  }
  static IEnumerable<SourceLine> Source(IEnumerable<WipLine> lines)=>lines.Select(x=>new SourceLine(x.Id,x.Type=="Time"?WipKind.Time:WipKind.Expense,x.Quantity,x.Rate,x.Amount));
+ public object SaveBatch(Project project,BulkAdjustmentRequest req,List<WipLine> lines,BillingEngine engine){lock(adjustmentLock){
+ var id=project.Id;var existing=adjustments.GetValueOrDefault(id) ?? [];
+ var writeUp=(writeUps.GetValueOrDefault(id) ?? []).Sum(x=>x.Amount);
+ var current=BillingCalculations.Replay(Source(lines),existing,writeUp);
+ var batch=new AdjustmentBatch(req.BatchId,req.Action=="POSTPONE"?AdjustmentKind.Postpone:AdjustmentKind.WriteOff,req.Actor,req.Reason,req.StateHash,req.Items!);
+ var prepared=BulkAdjustments.Prepare(batch,Source(lines),existing,engine.StateHash(project,current),DateTimeOffset.UtcNow,writeUp);
+ if(prepared.Length==0)return new {batchId=req.BatchId,replayed=true};
+ var next=existing.ToList();var previousAudit=adjustmentAudits.GetValueOrDefault(id) ?? [];var audits=previousAudit.ToList();
+ var sourceHash=BillingCalculations.FinancialHash(id,BillingCalculations.Replay(Source(lines),[]));
+ foreach(var ev in prepared){
+ var before=BillingCalculations.Replay(Source(lines),next,writeUp).Lines.First(x=>x.LineId==ev.LineId);
+ next.Add(ev);
+ var after=BillingCalculations.Replay(Source(lines),next,writeUp).Lines.First(x=>x.LineId==ev.LineId);
+ audits.Add(new AdjustmentAudit(id,ev.EventId,ev.LineId,ev.Kind.ToString(),ev.Amount,ev.Actor,ev.Rationale,ev.At,before,after,sourceHash,"Immutable allocation snapshot captured at batch commit"));
+ }
+ adjustments[id]=next;adjustmentAudits[id]=audits;
+ try{SaveLocal();}catch{
+ if(existing.Count==0)adjustments.Remove(id);else adjustments[id]=existing;
+ if(previousAudit.Count==0)adjustmentAudits.Remove(id);else adjustmentAudits[id]=previousAudit;
+ throw;
+ }
+ return new {batchId=req.BatchId,replayed=false};
+ }}
  public async Task<object> SaveAdjustment(string project,AdjustmentRequest req,List<WipLine> lines){
  if(string.IsNullOrWhiteSpace(req.EventId))throw new ArgumentException("Event ID required for adjustment retries.");
  AdjustmentEvent ev;

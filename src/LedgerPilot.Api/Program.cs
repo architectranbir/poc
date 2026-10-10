@@ -62,8 +62,11 @@ app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,Billin
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
  var findings=e.Findings(p,lines);
  if(findings.Any(f=>f.Severity=="BLOCK"))return Results.BadRequest(new {error="Blocking findings",findings});
- var position=s.Position(id,lines);var amount=position.Bill;var hash=BillingCalculations.FinancialHash(id,position);
- var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey);
+ var position=s.Position(id,lines);
+ var pending=findings.Where(f=>f.Severity=="CONFIRM" && !(req.Acknowledgements ?? []).Any(a=>a.FindingId==f.Id && a.DependencyHash==f.DependencyHash)).ToArray();
+ if(pending.Length>0)return Results.BadRequest(new {error="Current finding acknowledgements required",findings=pending});
+ var amount=position.Bill;var hash=BillingCalculations.FinancialHash(id,position);
+ var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey,req.Acknowledgements ?? []);
  return Results.Ok(doc);
 });
 app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s)=>await s.GetPbd(pbdId) is {} doc?Results.Ok(doc):Results.NotFound());
@@ -112,13 +115,14 @@ static class ProjectRoles {
 }
 record Project(string Id,string Name,string Unit,string Currency,string BillingCurrency,string VatCode,string Email,string Po,string Requestor,string Manager,string Partner,string BillingType,string EndClient,string ReceivingEngagementCode);
 record WipLine(string Id,string ProjectId,string Person,string Type,decimal Quantity,decimal Rate,decimal Amount,int AgeDays,bool PlannedChargeable,string Date);
-record Finding(string Rule,string Severity,string Message);
+record Finding(string Rule,string Severity,string Message,string Id="",string DependencyHash="");
+record AcknowledgementInput(string FindingId,string DependencyHash);
 record ReviewRequest(decimal ProposedAmount,decimal WriteOff=0,decimal WriteUp=0);
 record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm,decimal Amount=0,string? EventId=null);
-record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey);
+record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey,AcknowledgementInput[]? Acknowledgements=null);
 record ApproveRequest(string Actor,bool Confirm,string StateHash,int Version);
 record PostRequest(string Actor,bool Confirm);
-record Pbd(string Id,string ProjectId,decimal Amount,string Currency,string Status,int Version,string StateHash,string RequestedBy,string? ApprovedBy,string? MockSapPostingId);
+record Pbd(string Id,string ProjectId,decimal Amount,string Currency,string Status,int Version,string StateHash,string RequestedBy,string? ApprovedBy,string? MockSapPostingId,AcknowledgementInput[]? Acknowledgements=null);
 record AiRequest(string UserMessage,string? ProjectId,string? Facts);
 
 class BillingEngine{
@@ -130,7 +134,7 @@ class BillingEngine{
  if(string.IsNullOrEmpty(p.Email))f.Add(new("V-07","BLOCK","Billing email is missing"));
  if(string.IsNullOrEmpty(p.Po))f.Add(new("V-07","BLOCK","PO/reference is missing"));
  if(p.BillingType=="MemberFirm"&&(string.IsNullOrEmpty(p.EndClient)||string.IsNullOrEmpty(p.ReceivingEngagementCode)))f.Add(new("V-08/V-09","BLOCK","Member-firm fields missing"));
- foreach(var l in lines.Where(x=>!x.PlannedChargeable))f.Add(new("W-03","CONFIRM",$"{l.Person} was not planned chargeable ({l.Id})"));
+ foreach(var l in lines.Where(x=>!x.PlannedChargeable))f.Add(new("W-03","CONFIRM",$"{l.Person} was not planned chargeable ({l.Id})",$"W-03:{l.Id}",Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {schema=1,l.Id,l.Person,l.PlannedChargeable}))))));
  foreach(var l in lines.Where(x=>x.AgeDays>180))f.Add(new("W-09","ADVISORY",$"Aged WIP {l.Id}: {l.AgeDays} days"));
  return f;}
  public string Hash(string project,decimal amount,string narrative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{amount:F2}|{narrative}"))).ToLowerInvariant();
@@ -191,12 +195,12 @@ class BillingStore : IDisposable{
  }
  await Task.CompletedTask;return ev;
  }
- public Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key){
+ public Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key,AcknowledgementInput[] acknowledgements){
  if(string.IsNullOrWhiteSpace(key))throw new ArgumentException("Idempotency key required");
  lock(adjustmentLock){
  var scope=$"{project}:create:{key}";
  if(keys.TryGetValue(scope,out var existing))return Task.FromResult(pbds[existing]);
- var doc=new Pbd($"PBD-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}",project,amount,currency,"DRAFT",1,hash,actor,null,null);
+ var doc=new Pbd($"PBD-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}",project,amount,currency,"DRAFT",1,hash,actor,null,null,acknowledgements);
  keys[scope]=doc.Id;pbds[doc.Id]=doc;
  try{SaveLocal();}catch{keys.TryRemove(scope,out _);pbds.TryRemove(doc.Id,out _);throw;}
  return Task.FromResult(doc);

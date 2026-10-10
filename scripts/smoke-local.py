@@ -62,6 +62,12 @@ def run():
             body = {"actor": p["requestor"], "confirm": True,
                     "narrative": "Synthetic test", "idempotencyKey": "smoke-draft"}
             request(f"/api/projects/{p['id']}/pbd", dict(body, actor="unrelated-user"), expected=403)
+            confirms = [f for f in snapshot["findings"] if f["severity"] == "CONFIRM"]
+            assert confirms, "Fixture must exercise confirmation gating"
+            if confirms:
+                request(f"/api/projects/{p['id']}/pbd", body, expected=400)
+                request(f"/api/projects/{p['id']}/pbd", dict(body, acknowledgements=[{"findingId": f["id"], "dependencyHash": "stale"} for f in confirms]), expected=400)
+            body["acknowledgements"] = [{"findingId": f["id"], "dependencyHash": f["dependencyHash"]} for f in confirms]
             doc = request(f"/api/projects/{p['id']}/pbd", body)
             again = request(f"/api/projects/{p['id']}/pbd", body)
             assert doc["id"] == again["id"]

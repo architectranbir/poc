@@ -42,3 +42,8 @@ The explain endpoint now loads project, financial position and findings server-s
 Adjustment, draft creation, approval and posting (including repeated posting requests) consistently require a project-mapped demo role. Unrelated actor strings are rejected with 403. These are synthetic local role checks, not authentication: actor strings remain caller-supplied, so JWT validation/project authorization must replace them before shared use. Loopback and Development restrictions remain enforced.
 
 Compiled smoke checks cover unrelated adjustment/draft/post actors and rejected AI fact injection, missing project and message length boundaries. No live Foundry inference was performed.
+
+## Confirmation finding gate
+W-03 confirmation findings now carry a stable line-based identity and a canonical dependency hash over line identity, person and planned chargeability. Draft creation rejects missing or stale acknowledgements and retains the accepted IDs/hashes with the draft snapshot. React exposes explicit per-finding review checkboxes and clears selection when switching projects. No automatic confirmation is submitted.
+
+Compiled API smoke requires a fixture with confirmation findings and verifies missing/stale rejection and current acceptance; React build passes. Browser interaction tests remain pending. This is the W-03 acknowledgement slice only: Finance approval, complete validator dependencies, authenticated intent receipts and all-rule submission integration remain outstanding.

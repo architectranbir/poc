@@ -15,6 +15,6 @@
     <Content Include="../../seed/*.json" Link="seed/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Copily.Domain\Copily.Domain.csproj" />
+    <ProjectReference Include="..\LedgerPilot.Domain\LedgerPilot.Domain.csproj" />
   </ItemGroup>
 </Project>

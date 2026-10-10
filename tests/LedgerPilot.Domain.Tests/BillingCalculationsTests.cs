@@ -1,7 +1,7 @@
 using System.Globalization;
-using Copily.Domain;
+using LedgerPilot.Domain;
 
-namespace Copily.Domain.Tests;
+namespace LedgerPilot.Domain.Tests;
 
 public sealed class BillingCalculationsTests
 {

@@ -1,6 +1,6 @@
-# Copily / Strata Billing AI — Azure PoC — development foundation
+# LedgerPilot — Azure PoC — development foundation
 
-A development foundation for the Copily / Strata Billing AI PoC. It is NOT a certified, fully tested 44-rule implementation, real SAP integration, or production-ready financial application. Read `docs/IMPLEMENTATION_STATUS.md` before deployment.
+A development foundation for the LedgerPilot PoC. It is NOT a certified, fully tested 44-rule implementation, real SAP integration, or production-ready financial application. Read `docs/IMPLEMENTATION_STATUS.md` before deployment.
 
 ## Architecture
 
@@ -27,9 +27,9 @@ Dependency lockfiles pin the verified restore graph. See docs/VERIFICATION.md fo
 ## Build and test
 
 ```bash
-dotnet restore Copily.slnx --locked-mode
-dotnet build Copily.slnx -c Release --no-restore -m:1
-dotnet test tests/Copily.Domain.Tests -c Release --no-build
+dotnet restore LedgerPilot.slnx --locked-mode
+dotnet build LedgerPilot.slnx -c Release --no-restore -m:1
+dotnet test tests/LedgerPilot.Domain.Tests -c Release --no-build
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 cd web && npm ci && npm run build
 ```

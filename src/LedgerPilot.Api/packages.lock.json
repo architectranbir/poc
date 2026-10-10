@@ -290,7 +290,7 @@
           "System.Drawing.Common": "6.0.0"
         }
       },
-      "copily.domain": {
+      "ledgerpilot.domain": {
         "type": "Project"
       }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-: "${AZ_RG:=rg-copily-sandbox}"
+: "${AZ_RG:=rg-ledgerpilot-sandbox}"
 : "${AZ_LOCATION:=uksouth}"
 : "${AZ_STORAGE:?Set AZ_STORAGE to a unique lowercase storage account name}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

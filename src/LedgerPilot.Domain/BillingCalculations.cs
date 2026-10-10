@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace Copily.Domain;
+namespace LedgerPilot.Domain;
 
 public enum WipKind { Time, Expense }
 public enum AdjustmentKind { Postpone, WriteOff }

@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Copily.Domain\Copily.Domain.csproj" />
+    <ProjectReference Include="..\..\src\LedgerPilot.Domain\LedgerPilot.Domain.csproj" />
   </ItemGroup>
 
 </Project>

@@ -6,7 +6,7 @@ const projects=await (await fetch(api+'/api/projects')).json();
 let snapshot;
 for(const p of projects){
   const current=await (await fetch(`${api}/api/projects/${p.id}/wip`)).json();
-  if(!current.findings.some(f=>f.severity==='BLOCK')){snapshot=current;break;}
+  if(!current.findings.some(f=>f.severity==='BLOCK')&&current.position.lines.filter(l=>l.bill>0).length>=2){snapshot=current;break;}
 }
 if(!snapshot)throw new Error('No billable synthetic fixture');
 await mkdir('artifacts/browser',{recursive:true});
@@ -48,7 +48,7 @@ try{
   await page.getByRole('button',{name:'Confirm posting',exact:true}).click();
   await page.getByText(/Status: POST_PENDING/).waitFor();
   let posted=false;
-  for(let attempt=0;attempt<30;attempt++){
+  for(let attempt=0;attempt<Number(process.env.POSTING_ATTEMPTS||30);attempt++){
     await page.getByRole('button',{name:'Refresh posting status',exact:true}).click();
     const status=page.getByText(/Status: POSTED/);
     try{await status.waitFor({timeout:1000});posted=true;break;}catch{}

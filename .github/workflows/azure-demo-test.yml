@@ -1,0 +1,34 @@
+name: Test deployed Azure billing journey
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/azure-demo-test.yml']
+permissions:
+  contents: read
+jobs:
+  live-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API_URL: ${{ vars.DEMO_URL || 'https://ledgerpilot-7dde6178-demo.proudstone-284517a6.centralindia.azurecontainerapps.io' }}
+      WEB_URL: ${{ vars.DEMO_URL || 'https://ledgerpilot-7dde6178-demo.proudstone-284517a6.centralindia.azurecontainerapps.io' }}
+      POSTING_ATTEMPTS: '90'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify public API
+        run: curl --fail --silent --show-error "$API_URL/health"
+      - name: Install browser runtime
+        run: |
+          npm ci --prefix tests/browser
+          npx --prefix tests/browser playwright install --with-deps chromium
+      - name: Confirm billing, approval and SAP posting in Azure
+        run: node tests/browser/posting.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: azure-browser-evidence
+          path: artifacts/browser

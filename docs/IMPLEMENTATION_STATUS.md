@@ -60,3 +60,8 @@ JWT bearer validation and a delegated tenant/scope policy now protect all API ro
 React now initializes MSAL, presents an explicit Microsoft account selection popup, acquires API tokens silently and supplies bearer headers. Project loading waits for sign-in. Sign-out clears displayed billing state. A dedicated redirect bridge is included as a separate Vite build entry. The dependency and npm lockfile pin MSAL 5.25.0.
 
 Default and Entra-configured production builds were verified; the configured build uses synthetic registration identifiers solely to check compilation/bundling. No real authentication was performed. LocalDemo is explicitly limited to localhost Vite development, with no implicit production fallback. Missing configuration displays a setup message. App registrations, real login/token validation, project object-ID mapping and browser journey tests remain pending.
+
+## Committed write-ups
+Write-up commands now validate project role, confirmation, positive amount, rationale and stable event ID. Events are saved in the local state snapshot and folded into bill/revenue figures and financial hashes. Identical retries return the existing event; conflicting reuse returns 400. Review and draft Finance checks use committed write-off/write-up values, not caller review amounts. UI retries reuse a command ID for unchanged input.
+
+API smoke verifies a £22,000 uplift, single effect on retry, invalid/unauthorized/conflicting rejection, revenue reconciliation and fresh Finance approval before draft creation. .NET and React builds pass. Real browser tests, restart-specific write-up test and Azure transactional storage remain pending. Currency/VAT/fixed-price rules and authenticated external demonstration are not complete.

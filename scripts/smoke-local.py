@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Start the compiled local API and exercise its limited synthetic billing path."""
 import json
+from decimal import Decimal
 import os
 from pathlib import Path
 import socket
@@ -156,6 +157,21 @@ def run():
                     request(f"/api/projects/{p['id']}/pbd", finance_body)
                     request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="finance-stale", amount=0.01))
                     request(f"/api/projects/{p['id']}/pbd", dict(finance_body, idempotencyKey="finance-new"), expected=400)
+                    before_writeup = request(f"/api/projects/{p['id']}/wip")
+                    writeup = {"eventId": "writeup-22000", "amount": 22000, "actor": p["requestor"], "reason": "Synthetic agreed commercial uplift", "confirm": True}
+                    request(f"/api/projects/{p['id']}/write-ups", dict(writeup, actor="unrelated-user"), expected=403)
+                    request(f"/api/projects/{p['id']}/write-ups", dict(writeup, amount=-1), expected=400)
+                    request(f"/api/projects/{p['id']}/write-ups", writeup)
+                    request(f"/api/projects/{p['id']}/write-ups", writeup)
+                    request(f"/api/projects/{p['id']}/write-ups", dict(writeup, amount=23000), expected=400)
+                    uplifted = request(f"/api/projects/{p['id']}/wip")
+                    assert Decimal(str(uplifted["total"])) == Decimal(str(before_writeup["total"])) + Decimal("22000")
+                    assert uplifted["position"]["writeUp"] == 22000
+                    assert abs(uplifted["position"]["revenueImpact"] - (22000 - uplifted["position"]["writeOff"])) < 0.00001
+                    request(f"/api/projects/{p['id']}/pbd", dict(body, idempotencyKey="writeup-draft"), expected=400)
+                    request(f"/api/projects/{p['id']}/finance-approval", dict(finance, stateHash=uplifted["financialHash"]))
+                    uplift_draft = request(f"/api/projects/{p['id']}/pbd", dict(body, idempotencyKey="writeup-draft"))
+                    assert uplift_draft["amount"] == uplifted["total"]
                     # A second process must not share the single-process store.
                     other = subprocess.run([dotnet, str(dll)], cwd=root, env=dict(env, ASPNETCORE_URLS="http://127.0.0.1:0"), capture_output=True, timeout=10)
                     assert other.returncode != 0

@@ -1,0 +1,27 @@
+name: Container end-to-end checks
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  container-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime images
+        run: docker compose --profile azure build
+      - name: Build hosted React image
+        run: docker build -f containers/Dockerfile.web --target production -t ledgerpilot-web .
+      - name: Start isolated synthetic services
+        run: docker compose up -d postgres azurite api sap workflows web
+      - name: Test packaged posting flow
+        run: python3 scripts/smoke-containers.py
+      - name: Show service failures
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Clean up
+        if: always()
+        run: docker compose down --volumes

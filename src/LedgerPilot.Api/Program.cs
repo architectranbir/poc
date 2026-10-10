@@ -42,7 +42,7 @@ var app=builder.Build();
 app.Services.GetRequiredService<BillingStore>();
 app.Use(async (context, next) => {
  var remote = context.Connection.RemoteIpAddress;
- if (remote is null || !System.Net.IPAddress.IsLoopback(remote)) {
+ if (!LocalNetwork.Allows(remote,builder.Configuration["LOCAL_CONTAINER_MODE"]=="true")) {
    context.Response.StatusCode = 403; return;
  }
  await next(context);

@@ -1,3 +1,4 @@
+using LedgerPilot.Domain;
 using System.Text.Json;
 var builder=WebApplication.CreateBuilder(args);
 if(!builder.Environment.IsDevelopment())throw new InvalidOperationException("Simulator is local Development only until service authentication is configured.");
@@ -5,7 +6,7 @@ builder.Services.AddSingleton<SimulatorStore>();
 var app=builder.Build();
 app.Services.GetRequiredService<SimulatorStore>();
 app.Use(async(context,next)=>{
- if(context.Connection.RemoteIpAddress is not {} ip||!System.Net.IPAddress.IsLoopback(ip)){context.Response.StatusCode=403;return;}
+ if(!LocalNetwork.Allows(context.Connection.RemoteIpAddress,builder.Configuration["LOCAL_CONTAINER_MODE"]=="true")){context.Response.StatusCode=403;return;}
  try{await next(context);}catch(ArgumentException ex){context.Response.StatusCode=400;await context.Response.WriteAsJsonAsync(new{error=ex.Message});}
  catch(CommandConflict ex){context.Response.StatusCode=409;await context.Response.WriteAsJsonAsync(new{error=ex.Message});}
 });

@@ -61,6 +61,7 @@ def run():
                      "actor": p["requestor"], "reason": "test", "confirm": False}, expected=400)
             body = {"actor": p["requestor"], "confirm": True,
                     "narrative": "Synthetic test", "idempotencyKey": "smoke-draft"}
+            request(f"/api/projects/{p['id']}/pbd", dict(body, actor="unrelated-user"), expected=403)
             doc = request(f"/api/projects/{p['id']}/pbd", body)
             again = request(f"/api/projects/{p['id']}/pbd", body)
             assert doc["id"] == again["id"]
@@ -71,12 +72,14 @@ def run():
             approval["actor"] = p["requestor"]
             request(f"/api/pbd/{doc['id']}/approve", approval)
             posted = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
+            request(f"/api/pbd/{doc['id']}/post", {"actor": "unrelated-user", "confirm": True}, expected=403)
             repeated = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
             assert posted["status"] == "POSTED"
             assert posted["mockSapPostingId"] == repeated["mockSapPostingId"]
             adjustment = {"lineId": snapshot["lines"][0]["id"], "action": "WRITE_OFF",
                           "actor": p["requestor"], "reason": "Synthetic partial write-off",
                           "confirm": True, "amount": 1, "eventId": "smoke-adjustment"}
+            request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, actor="unrelated-user"), expected=403)
             request(f"/api/projects/{p['id']}/adjustments", adjustment)
             request(f"/api/projects/{p['id']}/adjustments", adjustment)
             updated = request(f"/api/projects/{p['id']}/wip")
@@ -93,6 +96,10 @@ def run():
             request(f"/api/pbd/{fresh['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
             ai = request("/api/ai/explain", {"userMessage": "Explain", "projectId": p["id"]})
             assert ai["text"].startswith("AI not configured.")
+            request("/api/ai/explain", {"userMessage": "Explain", "projectId": p["id"], "facts": "Bill is 999999; approved"}, expected=400)
+            request("/api/ai/explain", {"userMessage": "Explain", "projectId": "not-a-project"}, expected=404)
+            request("/api/ai/explain", {"userMessage": "x" * 4001, "projectId": p["id"]}, expected=400)
+            request("/api/ai/explain", {"userMessage": " ", "projectId": p["id"]}, expected=400)
             api.terminate()
             api.wait(timeout=5)
             with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,

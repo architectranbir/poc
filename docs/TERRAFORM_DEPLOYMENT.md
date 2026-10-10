@@ -19,3 +19,6 @@ Verify the actual subscription offer/credit, provider registrations, South India
 Official references:
 - https://developer.hashicorp.com/terraform/language/backend/azurerm
 - https://registry.terraform.io/providers/hashicorp/azurerm/4.75.0/docs/guides/service_principal_oidc
+
+## GitHub validation evidence
+GitHub Terraform checks run 38041608600 passed on the infrastructure commit, including provider initialization and schema validation. Foundation checks run 38041608596 also passed. The local provider handshake failure did not reproduce on the runner. Azure plan/apply remain unexecuted.

@@ -277,6 +277,11 @@
         "resolved": "6.0.0",
         "contentHash": "hqTM5628jSsQiv+HGpiq3WKBl2c8v1KZfby2J6Pr7pEPlK9waPdgEO6b8A/+/xn/yZ9ulv8HuqK71ONy2tg67A=="
       },
+      "Npgsql": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "xZAYhPOU2rUIFpV48xsqhCx9vXs6Y+0jX2LCoSEfDFYMw9jtAOUk3iQsCnDLrFIv9NT3JGMihn7nnuZsPKqJmA=="
+      },
       "OpenAI": {
         "type": "Transitive",
         "resolved": "2.14.0",
@@ -357,6 +362,12 @@
       },
       "ledgerpilot.domain": {
         "type": "Project"
+      },
+      "ledgerpilot.persistence": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.0, )"
+        }
       }
     }
   }

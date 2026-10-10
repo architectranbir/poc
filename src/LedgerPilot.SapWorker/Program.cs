@@ -29,9 +29,9 @@ if(transport=="LocalFiles"){
  processor.ProcessMessageAsync+=async args=>{
  try{
  var command=JsonSerializer.Deserialize<SapCommand>(args.Message.Body.ToString(),options)??throw new InvalidDataException("Empty command");
- if(command.Operation is not ("Create" or "Post")||string.IsNullOrWhiteSpace(command.CommandKey)||command.CommandKey.Length>128||args.Message.MessageId!=command.CommandKey)throw new InvalidDataException("Invalid command envelope or MessageId");
+ if(command.Operation is not ("Create" or "Post" or "CreateAndPost")||string.IsNullOrWhiteSpace(command.CommandKey)||command.CommandKey.Length>128||args.Message.MessageId!=command.CommandKey)throw new InvalidDataException("Invalid command envelope or MessageId");
  command.Validate();
- var canonical=JsonSerializer.Serialize(command);
+ var canonical=command.CanonicalPayload();
  var key=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(command.Operation+":"+command.CommandKey)));
  var path=Path.Combine(directory,key+".command.json");
  if(File.Exists(path)&&await File.ReadAllTextAsync(path)!=canonical)throw new InvalidDataException("Command key reused with different content");
@@ -53,9 +53,9 @@ if(transport=="LocalFiles"){
 async Task<bool> ProcessFile(string path){
  var command=JsonSerializer.Deserialize<SapCommand>(await File.ReadAllTextAsync(path),options)??throw new InvalidDataException("Empty command");
  command.Validate();
- var canonical=JsonSerializer.Serialize(command);
+ var canonical=command.CanonicalPayload();
  if(commandStore is not null)await commandStore.VerifyAccepted(command.CommandKey,canonical);
- var hash=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command))));
+ var hash=Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(command.CanonicalPayload())));
  var resultPath=path+".result.json";
  if(commandStore is not null){
  var saved=await commandStore.Receipt(command.CommandKey);
@@ -68,7 +68,7 @@ async Task<bool> ProcessFile(string path){
  }
  try{
  JsonElement response;
- if(command.Operation=="Create"){
+ if(command.Operation is "Create" or "CreateAndPost"){
  using var lookup=await http.GetAsync("/commands/"+Uri.EscapeDataString(command.CommandKey));
  if(lookup.StatusCode==HttpStatusCode.NotFound)response=await Send("/documents",new {command.CommandKey,command.ProjectId,command.Net,command.Currency,command.StateHash});
  else{lookup.EnsureSuccessStatusCode();response=JsonDocument.Parse(await lookup.Content.ReadAsStringAsync()).RootElement.Clone();}
@@ -81,6 +81,12 @@ async Task<bool> ProcessFile(string path){
  if(doc.GetProperty("status").GetString()=="POSTED"&&doc.GetProperty("postingCommandKey").GetString()==command.CommandKey&&doc.GetProperty("request").GetProperty("stateHash").GetString()==command.StateHash)response=doc;
  else response=await Send($"/documents/{Uri.EscapeDataString(command.DocumentId!)}/post",new {command.CommandKey,command.StateHash});
  }else throw new InvalidDataException("Unknown operation");
+ if(command.Operation=="CreateAndPost"){
+ var doc=response;
+ if(doc.GetProperty("status").GetString()=="POSTED"){
+ if(doc.GetProperty("postingCommandKey").GetString()!=command.CommandKey)throw new InvalidDataException("Posting command differs");
+ }else response=await Send($"/documents/{Uri.EscapeDataString(doc.GetProperty("id").GetString()!)}/post",new {command.CommandKey,command.StateHash});
+ }
  var result=new WorkerResult(hash,response,DateTimeOffset.UtcNow);
  if(commandStore is not null){await commandStore.Complete(command.CommandKey,JsonSerializer.Serialize(response));return true;}
  using(var stream=new FileStream(resultPath+".tmp",FileMode.Create,FileAccess.Write,FileShare.None)){JsonSerializer.Serialize(stream,result);stream.Flush(true);}
@@ -89,7 +95,7 @@ async Task<bool> ProcessFile(string path){
  }catch(HttpRequestException){Console.Error.WriteLine("Transport failure; command remains pending for retry.");return false;}
 }
 async Task<JsonElement> Send(string path,object command){
- using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(JsonSerializer.Serialize(command),Encoding.UTF8,"application/json")};
+ using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(command.CanonicalPayload(),Encoding.UTF8,"application/json")};
  if(Environment.GetEnvironmentVariable("SIMULATE_RESPONSE_LOSS")=="true")request.Headers.Add("X-Simulate-Response-Loss","true");
  using var response=await http.SendAsync(request);response.EnsureSuccessStatusCode();
  return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();

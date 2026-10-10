@@ -3,6 +3,7 @@ using Npgsql;
 
 namespace LedgerPilot.Persistence.Tests;
 
+[Collection("Database")]
 public sealed class CommandStoreTests
 {
     // Fail rather than silently skip when the integration database is unavailable.

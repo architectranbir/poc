@@ -1,3 +1,5 @@
+using LedgerPilot.Persistence;
+using Npgsql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
@@ -149,6 +151,7 @@ app.MapGet("/api/pbd/{pbdId}",async(string pbdId,BillingStore s,HttpContext cont
 app.MapPost("/api/pbd/{pbdId}/approve",async(string pbdId,ApproveRequest req,BillingStore s,BillingEngine e,HttpContext context)=>{
  if(authMode=="Entra")req=req with{Actor=context.User.FindFirst("oid")!.Value};
  var doc=await s.GetPbd(pbdId);if(doc is null)return Results.NotFound();
+ if(doc.Status is not ("DRAFT" or "APPROVED"))return Results.Conflict(new {error="Only drafts can be approved"});
  if(!req.Confirm||string.IsNullOrEmpty(req.Actor)||req.StateHash!=doc.StateHash||req.Version!=doc.Version)return Results.Conflict(new {error="Approval must match exact PBD version/state and actor"});
  var currentLines=(await s.Lines()).Where(x=>x.ProjectId==doc.ProjectId).ToList();
  var currentProject=(await s.Projects()).First(p=>p.Id==doc.ProjectId);
@@ -163,11 +166,12 @@ app.MapPost("/api/pbd/{pbdId}/post",async(string pbdId,PostRequest req,BillingSt
  var d=await s.GetPbd(pbdId);if(d is null)return Results.NotFound();
  var project=(await s.Projects()).First(p=>p.Id==d.ProjectId);
  if(!ProjectRoles.CanBill(project,req.Actor))return Results.StatusCode(403);
- if(d.Status=="POSTED")return Results.Ok(d);
+ if(d.Status is "POSTED" or "POST_PENDING")return Results.Ok(d);
  var currentLines=(await s.Lines()).Where(x=>x.ProjectId==d.ProjectId).ToList();
  if(d.StateHash!=e.StateHash(project,s.Position(d.ProjectId,currentLines),d.Narrative))return Results.Conflict(new {error="Billing state changed; approval invalidated"});
  if(d.Status!="APPROVED")return Results.Conflict(new {error="PBD must be approved before posting"});
- return Results.Ok(await s.PostPbd(pbdId));
+ try{return Results.Ok(s.UsesPostgres?await s.QueuePost(pbdId,()=>e.StateHash(project,s.Position(d.ProjectId,currentLines),d.Narrative)):await s.PostPbd(pbdId));}
+ catch(InvalidOperationException){return Results.Conflict(new {error="Posting acceptance failed; refresh and review current state"});}
 });
 app.MapPost("/api/ai/explain",async(AiRequest req,AiAssistant ai,BillingStore store,BillingEngine engine,HttpContext context)=>{
  if(string.IsNullOrWhiteSpace(req.UserMessage)||req.UserMessage.Length>4000)return Results.BadRequest(new {error="Message must contain 1 to 4000 characters"});
@@ -235,13 +239,22 @@ record AdjustmentAudit(string ProjectId,string EventId,string LineId,string Acti
 record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys,Dictionary<string,StateApproval>? FinanceApprovals=null,Dictionary<string,List<WriteUpEvent>>? WriteUps=null,Dictionary<string,List<AdjustmentAudit>>? AdjustmentAudits=null);
 class BillingStore : IDisposable{
  readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly Dictionary<string,List<AdjustmentEvent>> adjustments=new(); readonly object adjustmentLock=new();
- readonly Dictionary<string,List<AdjustmentAudit>> adjustmentAudits=new(); readonly Dictionary<string,List<WriteUpEvent>> writeUps=new(); readonly Dictionary<string,StateApproval> financeApprovals=new(); readonly string stateFile; readonly FileStream processLock;
+ readonly Dictionary<string,List<AdjustmentAudit>> adjustmentAudits=new(); readonly Dictionary<string,List<WriteUpEvent>> writeUps=new(); readonly Dictionary<string,StateApproval> financeApprovals=new(); readonly string stateFile; readonly FileStream? processLock; readonly BillingSnapshotStore? databaseSnapshot; readonly NpgsqlDataSource? database; readonly CommandStore? commandStore;
  public BillingStore(IConfiguration c){cfg=c;
  stateFile=Path.GetFullPath(c["STATE_PATH"] ?? Path.Combine(AppContext.BaseDirectory,"local-state","billing.json"));
+ var connection=c["COMMAND_STORE_CONNECTION"];
+ string? savedJson;
+ if(!string.IsNullOrWhiteSpace(connection)){
+ database=NpgsqlDataSource.Create(connection);commandStore=new CommandStore(database);
+ commandStore.Initialize().GetAwaiter().GetResult();
+ databaseSnapshot=new BillingSnapshotStore(connection);savedJson=databaseSnapshot.Load();
+ }else{
  Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
  processLock=new FileStream(stateFile+".lock",FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
- if(File.Exists(stateFile)){
- var saved=JsonSerializer.Deserialize<LocalBillingState>(File.ReadAllText(stateFile)) ?? throw new InvalidDataException("Empty billing state.");
+ savedJson=File.Exists(stateFile)?File.ReadAllText(stateFile):null;
+ }
+ if(savedJson is not null){
+ var saved=JsonSerializer.Deserialize<LocalBillingState>(savedJson) ?? throw new InvalidDataException("Empty billing state.");
  if(saved.Schema!=1)throw new InvalidDataException("Unsupported billing state schema.");
  foreach(var item in saved.AdjustmentAudits ?? [])adjustmentAudits[item.Key]=item.Value;
  foreach(var item in saved.WriteUps ?? [])writeUps[item.Key]=item.Value;
@@ -264,9 +277,11 @@ class BillingStore : IDisposable{
  public Task<List<Project>> Projects()=>Load<List<Project>>("projects.json");
  public Task<List<FixedPriceSchedule>> FixedPriceSchedules()=>Load<List<FixedPriceSchedule>>("fixed-price-schedules.json");
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
- public void Dispose(){processLock.Dispose();}
- void SaveLocal(){
+ public void Dispose(){processLock?.Dispose();databaseSnapshot?.Dispose();database?.Dispose();}
+ void SaveLocal(SapCommand? command=null){
  var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value),financeApprovals,writeUps,adjustmentAudits);
+ if(databaseSnapshot is not null){databaseSnapshot.Save(JsonSerializer.Serialize(snapshot),command);return;}
+ if(command is not null)throw new InvalidOperationException("SAP commands require PostgreSQL");
  var temporary=stateFile+".tmp";
  using(var stream=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){
  JsonSerializer.Serialize(stream,snapshot);stream.Flush(true);
@@ -343,12 +358,33 @@ class BillingStore : IDisposable{
  try{SaveLocal();}catch{keys.TryRemove(scope,out _);pbds.TryRemove(doc.Id,out _);throw;}
  return Task.FromResult(doc);
  }}
- public Task<Pbd?> GetPbd(string id)=>Task.FromResult(pbds.TryGetValue(id,out var d)?d:null);
+ public Task<Pbd?> GetPbd(string id){lock(adjustmentLock){
+ if(!pbds.TryGetValue(id,out var d))return Task.FromResult<Pbd?>(null);
+ if(d.Status=="POST_PENDING" && commandStore is not null){
+ var receipt=commandStore.Receipt("post:"+d.Id).GetAwaiter().GetResult();
+ if(receipt is not null){
+ using var json=JsonDocument.Parse(receipt);var root=json.RootElement;
+ if(root.GetProperty("status").GetString()!="POSTED" || root.GetProperty("postingCommandKey").GetString()!="post:"+d.Id)throw new InvalidDataException("Invalid posting receipt");
+ var next=d with{Status="POSTED",MockSapPostingId=root.GetProperty("postingReference").GetString()};pbds[id]=next;
+ try{SaveLocal();}catch{pbds[id]=d;throw;}d=next;
+ }
+ }
+ return Task.FromResult<Pbd?>(d);
+ }}
  Task<Pbd> UpdatePbd(string id,Func<Pbd,Pbd> update){lock(adjustmentLock){
  var old=pbds[id];var next=update(old);pbds[id]=next;
  try{SaveLocal();}catch{pbds[id]=old;throw;}return Task.FromResult(next);
  }}
  public Task<Pbd> ApprovePbd(string id,string actor)=>UpdatePbd(id,d=>d with{Status="APPROVED",ApprovedBy=actor});
+ public Task<Pbd> QueuePost(string id,Func<string> currentHash){lock(adjustmentLock){
+ var old=pbds[id];if(old.StateHash!=currentHash())throw new InvalidOperationException("Draft changed");
+ if(old.Status is "POST_PENDING" or "POSTED")return Task.FromResult(old);
+ if(old.Status!="APPROVED")throw new InvalidOperationException("Approval required");
+ var command=new SapCommand("CreateAndPost","post:"+old.Id,old.ProjectId,old.Amount,old.Currency,old.StateHash);
+ var next=old with{Status="POST_PENDING"};pbds[id]=next;
+ try{SaveLocal(command);}catch{pbds[id]=old;throw;}return Task.FromResult(next);
+ }}
+ public bool UsesPostgres=>databaseSnapshot is not null;
  public Task<Pbd> PostPbd(string id)=>UpdatePbd(id,d=>d.Status=="POSTED"?d:d with{Status="POSTED",MockSapPostingId=$"SIM-SAP-{Guid.NewGuid().ToString("N")[..10]}"});
 
 }

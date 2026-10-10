@@ -6,7 +6,7 @@ W-04,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 W-05,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 W-06,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 W-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-W-08,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+W-08,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 W-09,PARTIAL,Aged WIP finding basic
 W-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 A-01,PARTIAL,Simplified threshold question - needs rule reconciliation
@@ -25,13 +25,13 @@ V-09,PARTIAL,Member-firm receiving code
 V-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 V-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 V-12,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-P-01,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-01,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 P-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 P-03,PARTIAL,Tax & Legal threshold check
 P-04,PARTIAL,Advisory threshold check
 P-05,PARTIAL,Audit threshold check
 P-06,PARTIAL,Strict greater-than threshold
-P-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-07,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 P-08,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 P-09,PARTIAL,Pure submission controls tested; API and persistence integration pending
 P-10,PARTIAL,Pure submission controls tested; API and persistence integration pending

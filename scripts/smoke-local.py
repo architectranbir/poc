@@ -71,6 +71,23 @@ def run():
             repeated = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
             assert posted["status"] == "POSTED"
             assert posted["mockSapPostingId"] == repeated["mockSapPostingId"]
+            adjustment = {"lineId": snapshot["lines"][0]["id"], "action": "WRITE_OFF",
+                          "actor": p["requestor"], "reason": "Synthetic partial write-off",
+                          "confirm": True, "amount": 1, "eventId": "smoke-adjustment"}
+            request(f"/api/projects/{p['id']}/adjustments", adjustment)
+            request(f"/api/projects/{p['id']}/adjustments", adjustment)
+            updated = request(f"/api/projects/{p['id']}/wip")
+            assert updated["total"] == snapshot["total"] - 1
+            assert updated["position"]["writeOff"] == 1
+            request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, amount=2), expected=400)
+            request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="too-much", amount=100000000), expected=400)
+            fresh = request(f"/api/projects/{p['id']}/pbd", dict(body, idempotencyKey="fresh"))
+            assert fresh["amount"] == updated["total"]
+            fresh_approval = dict(approval, stateHash=fresh["stateHash"], version=fresh["version"])
+            request(f"/api/pbd/{fresh['id']}/approve", fresh_approval)
+            request(f"/api/projects/{p['id']}/adjustments", dict(adjustment, eventId="second"))
+            request(f"/api/pbd/{fresh['id']}/approve", fresh_approval, expected=409)
+            request(f"/api/pbd/{fresh['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
             ai = request("/api/ai/explain", {"userMessage": "Explain", "projectId": p["id"]})
             assert ai["text"].startswith("AI not configured.")
             print("PASS: local API smoke (synthetic subset only; no live model or durable workflow)")

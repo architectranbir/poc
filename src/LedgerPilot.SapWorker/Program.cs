@@ -95,7 +95,7 @@ async Task<bool> ProcessFile(string path){
  }catch(HttpRequestException){Console.Error.WriteLine("Transport failure; command remains pending for retry.");return false;}
 }
 async Task<JsonElement> Send(string path,object command){
- using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(command.CanonicalPayload(),Encoding.UTF8,"application/json")};
+ using var request=new HttpRequestMessage(HttpMethod.Post,path){Content=new StringContent(JsonSerializer.Serialize(command),Encoding.UTF8,"application/json")};
  if(Environment.GetEnvironmentVariable("SIMULATE_RESPONSE_LOSS")=="true")request.Headers.Add("X-Simulate-Response-Loss","true");
  using var response=await http.SendAsync(request);response.EnsureSuccessStatusCode();
  return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();

@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Copily.Api/Copily.Api.csproj" />
-    <Project Path="src/Copily.Domain/Copily.Domain.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Copily.Domain.Tests/Copily.Domain.Tests.csproj" />
-  </Folder>
-</Solution>

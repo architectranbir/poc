@@ -1,11 +1,11 @@
-# Copily / Strata Billing AI PoC — repository review and implementation plan
+# LedgerPilot PoC — repository review and implementation plan
 Date: 10 October 2026
 Status: local foundation in progress; complete implementation and Azure deployment outstanding.
 
 ## Reviewed evidence
-- Current Library copies: Strata Billing PoC - Rule Registry (1)(1).docx; Billing AI - Rules Checks and Controls(1).docx; deep-research-report(1).md.
-- Materialized and inspected copily-azure-poc-starter.zip (Library version 1).
-- Target repository is architectranbir/poc. Initial main contains README.md only. Work proceeds on feat/copily-foundation using the architectranbir account.
+- Current Library copies: the application Billing PoC - Rule Registry (1)(1).docx; Billing AI - Rules Checks and Controls(1).docx; deep-research-report(1).md.
+- Inspected the supplied starter archive (version 1).
+- Target repository is architectranbir/poc. Initial main contains README.md only. Work proceeds on feat/ledgerpilot-foundation using the architectranbir account.
 - The starter contains one ASP.NET Core .NET 10 API, React/Vite UI, five synthetic projects and 70 WIP lines, optional Blob reads/Cosmos writes, scripts and a coverage CSV.
 - Python seed checks: 3 passed. They verify project uniqueness, basic WIP relationships/non-negative amounts and policy thresholds only.
 - A local .NET 10 SDK and Node toolchain are now used. See VERIFICATION.md for current build/test evidence. Live Foundry and Azure execution remain unverified.
@@ -33,7 +33,7 @@ A C# domain library owns decimal arithmetic, event replay, validators, versioned
 Microsoft Agent Framework in the API invokes a Microsoft Foundry model through narrowly scoped tools. Model never receives direct SAP credentials or bypass privileges.
 Durable Functions (.NET isolated) owns long-running human waits, retry scheduling, reconciliation and workflow status.
 Service Bus carries SAP commands/results; a worker calls a separately hosted simulated SAP API.
-A transactional relational store holds Copily state, adjustments, findings, acknowledgements, approvals, outbox/inbox and idempotency outcomes.
+A transactional relational store holds LedgerPilot state, adjustments, findings, acknowledgements, approvals, outbox/inbox and idempotency outcomes.
 The simulator has a separate logical data store and implements stable document IDs, lookup by external command key, versions and repeatable failure modes.
 Azure Storage supports Durable state and synthetic fixture/artifact storage; Application Insights captures redacted correlation traces.
 
@@ -135,13 +135,13 @@ Posting period checks from the wider requirements are also tracked beyond the 44
 
 ## Proposed source layout
 - web/ — React, MSAL, typed API client, Playwright tests
-- src/Copily.Domain/ — pure rules, money, policies, state/dependency hash
-- src/Copily.Application/ — commands, gates and use cases
-- src/Copily.Api/ — authenticated HTTP endpoints and MAF tools
-- src/Copily.Infrastructure/ — persistence/outbox/inbox/provider adapters
-- src/Copily.Workflows/ — Durable Functions isolated host
-- src/Copily.SapWorker/ — Service Bus consumer/reconciliation
-- src/Copily.SapSimulator/ — synthetic SAP contracts and financial document store
+- src/LedgerPilot.Domain/ — pure rules, money, policies, state/dependency hash
+- src/LedgerPilot.Application/ — commands, gates and use cases
+- src/LedgerPilot.Api/ — authenticated HTTP endpoints and MAF tools
+- src/LedgerPilot.Infrastructure/ — persistence/outbox/inbox/provider adapters
+- src/LedgerPilot.Workflows/ — Durable Functions isolated host
+- src/LedgerPilot.SapWorker/ — Service Bus consumer/reconciliation
+- src/LedgerPilot.SapSimulator/ — synthetic SAP contracts and financial document store
 - tests/ — domain, contract, integration, workflow, authorization, AI evaluations
 - seed/ — complete versioned fixtures and expected outcomes
 - infra/ — Bicep modules, parameter examples, deploy/cleanup scripts

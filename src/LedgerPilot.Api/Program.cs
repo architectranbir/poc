@@ -7,7 +7,7 @@ using Azure.Storage.Blobs;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Agents.AI;
 using Azure.AI.Projects;
-using Copily.Domain;
+using LedgerPilot.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
 // This inherited scaffold has no end-user authentication yet. Fail closed for
@@ -118,7 +118,7 @@ class BillingStore{
  }
  public Task<List<Project>> Projects()=>Load<List<Project>>("projects.json");
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
- async Task Persist(string projectId,string id,object value){if(cosmos is not null){var container=cosmos.GetContainer("copily","billing-state");await container.UpsertItemAsync(value,new PartitionKey(projectId));}}
+ async Task Persist(string projectId,string id,object value){if(cosmos is not null){var container=cosmos.GetContainer("ledgerpilot","billing-state");await container.UpsertItemAsync(value,new PartitionKey(projectId));}}
  public async Task<object> SaveAdjustment(string id,AdjustmentRequest req){var ev=new {id=Guid.NewGuid().ToString(),projectId=id,eventType="adjustment",lineId=req.LineId,action=req.Action,actor=req.Actor,reason=req.Reason,at=DateTimeOffset.UtcNow}; adjustments.Add(ev);await Persist(id,ev.id,ev);return ev;}
  public async Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key){
  if(string.IsNullOrWhiteSpace(key))throw new ArgumentException("Idempotency key required");
@@ -135,7 +135,7 @@ class AiAssistant{
  public async Task<string> Explain(AiRequest req){
  var ep=cfg["FOUNDRY_PROJECT_ENDPOINT"];var model=cfg["FOUNDRY_MODEL"];
  if(string.IsNullOrWhiteSpace(ep)||string.IsNullOrWhiteSpace(model))return "AI not configured. Configure a Microsoft Foundry model deployment. Deterministic billing features remain available.";
- var agent=new AIProjectClient(new Uri(ep),new DefaultAzureCredential()).AsAIAgent(model:model,instructions:"You are Copily, a billing assistant. Never invent numbers, claim SAP access or approve/post a bill. Use only supplied facts. When uncertain ask for clarification.",name:"CopilyBillingAssistant");
+ var agent=new AIProjectClient(new Uri(ep),new DefaultAzureCredential()).AsAIAgent(model:model,instructions:"You are LedgerPilot, a billing assistant. Never invent numbers, claim SAP access or approve/post a bill. Use only supplied facts. When uncertain ask for clarification.",name:"LedgerPilotBillingAssistant");
  var result=await agent.RunAsync($"User: {req.UserMessage}\nProject: {req.ProjectId}\nVerified facts: {req.Facts}\nOnly explain facts. Do not issue financial commands.");
  return result.ToString();
  }

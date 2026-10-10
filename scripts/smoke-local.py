@@ -11,7 +11,7 @@ import urllib.request
 
 root = Path(__file__).resolve().parents[1]
 dotnet = os.environ.get("DOTNET_COMMAND", "dotnet")
-dll = root / "src/Copily.Api/bin/Release/net10.0/Copily.Api.dll"
+dll = root / "src/LedgerPilot.Api/bin/Release/net10.0/LedgerPilot.Api.dll"
 
 
 def run():

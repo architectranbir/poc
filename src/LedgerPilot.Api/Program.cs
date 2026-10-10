@@ -35,7 +35,7 @@ app.MapGet("/api/projects/{id}/wip",async(string id,BillingStore s,BillingEngine
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
  if(project is null)return Results.NotFound();
  var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
- return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),findings=e.Findings(project,lines)});
+ return Results.Ok(new {project,lines,total=s.Position(id,lines).Bill,position=s.Position(id,lines),financialHash=BillingCalculations.FinancialHash(id,s.Position(id,lines)),financeRequired=BillingCalculations.NeedsFinanceApproval(project.Unit,s.Position(id,lines).WriteOff,s.Position(id,lines).WriteUp),findings=e.Findings(project,lines)});
 });
 app.MapPost("/api/projects/{id}/review",async(string id,ReviewRequest req,BillingStore s,BillingEngine e)=>{
  var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);
@@ -55,6 +55,15 @@ app.MapPost("/api/projects/{id}/adjustments",async(string id,AdjustmentRequest r
  try { return Results.Ok(await s.SaveAdjustment(id,req,lines)); }
  catch(ArgumentException ex) { return Results.BadRequest(new {error=ex.Message}); }
 });
+app.MapPost("/api/projects/{id}/finance-approval",async(string id,FinanceApprovalRequest req,BillingStore s)=>{
+ var project=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(project is null)return Results.NotFound();
+ if(!req.Confirm)return Results.BadRequest(new {error="Explicit Finance confirmation required"});
+ if(string.IsNullOrWhiteSpace(project.FinanceApprover)||!string.Equals(project.FinanceApprover,req.Actor,StringComparison.OrdinalIgnoreCase))return Results.StatusCode(403);
+ var lines=(await s.Lines()).Where(x=>x.ProjectId==id).ToList();
+ var hash=BillingCalculations.FinancialHash(id,s.Position(id,lines));
+ if(req.StateHash!=hash)return Results.Conflict(new {error="Finance approval state is stale"});
+ return Results.Ok(s.SaveFinanceApproval(id,new StateApproval(hash,req.Actor,"Finance")));
+});
 app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,BillingStore s,BillingEngine e)=>{
  if(!req.Confirm||string.IsNullOrWhiteSpace(req.Actor))return Results.BadRequest(new {error="Explicit human intent required"});
  var p=(await s.Projects()).FirstOrDefault(p=>p.Id==id);if(p is null)return Results.NotFound();
@@ -65,6 +74,8 @@ app.MapPost("/api/projects/{id}/pbd",async(string id,CreatePbdRequest req,Billin
  var position=s.Position(id,lines);
  var pending=findings.Where(f=>f.Severity=="CONFIRM" && !(req.Acknowledgements ?? []).Any(a=>a.FindingId==f.Id && a.DependencyHash==f.DependencyHash)).ToArray();
  if(pending.Length>0)return Results.BadRequest(new {error="Current finding acknowledgements required",findings=pending});
+ var financialHash=BillingCalculations.FinancialHash(id,position);
+ if(BillingCalculations.NeedsFinanceApproval(p.Unit,position.WriteOff,position.WriteUp)&&!s.HasFinanceApproval(id,financialHash))return Results.BadRequest(new {error="Current-state Finance approval required"});
  var amount=position.Bill;var hash=BillingCalculations.FinancialHash(id,position);
  var doc=await s.CreatePbd(id,amount,p.Currency,hash,req.Actor,req.IdempotencyKey,req.Acknowledgements ?? []);
  return Results.Ok(doc);
@@ -113,10 +124,11 @@ static class ProjectRoles {
  public static bool CanBill(Project project,string? actor)=>!string.IsNullOrWhiteSpace(actor)&&
  new[]{project.Requestor,project.Manager,project.Partner}.Any(x=>!string.IsNullOrWhiteSpace(x)&&string.Equals(x,actor,StringComparison.OrdinalIgnoreCase));
 }
-record Project(string Id,string Name,string Unit,string Currency,string BillingCurrency,string VatCode,string Email,string Po,string Requestor,string Manager,string Partner,string BillingType,string EndClient,string ReceivingEngagementCode);
+record Project(string Id,string Name,string Unit,string Currency,string BillingCurrency,string VatCode,string Email,string Po,string Requestor,string Manager,string Partner,string BillingType,string EndClient,string ReceivingEngagementCode,string? FinanceApprover=null);
 record WipLine(string Id,string ProjectId,string Person,string Type,decimal Quantity,decimal Rate,decimal Amount,int AgeDays,bool PlannedChargeable,string Date);
 record Finding(string Rule,string Severity,string Message,string Id="",string DependencyHash="");
 record AcknowledgementInput(string FindingId,string DependencyHash);
+record FinanceApprovalRequest(string Actor,bool Confirm,string StateHash);
 record ReviewRequest(decimal ProposedAmount,decimal WriteOff=0,decimal WriteUp=0);
 record AdjustmentRequest(string LineId,string Action,string Actor,string Reason,bool Confirm,decimal Amount=0,string? EventId=null);
 record CreatePbdRequest(string Actor,bool Confirm,string Narrative,string IdempotencyKey,AcknowledgementInput[]? Acknowledgements=null);
@@ -139,10 +151,10 @@ class BillingEngine{
  return f;}
  public string Hash(string project,decimal amount,string narrative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{amount:F2}|{narrative}"))).ToLowerInvariant();
 }
-record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys);
+record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys,Dictionary<string,StateApproval>? FinanceApprovals=null);
 class BillingStore : IDisposable{
  readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly Dictionary<string,List<AdjustmentEvent>> adjustments=new(); readonly object adjustmentLock=new();
- readonly string stateFile; readonly FileStream processLock;
+ readonly Dictionary<string,StateApproval> financeApprovals=new(); readonly string stateFile; readonly FileStream processLock;
  public BillingStore(IConfiguration c){cfg=c;
  stateFile=Path.GetFullPath(c["STATE_PATH"] ?? Path.Combine(AppContext.BaseDirectory,"local-state","billing.json"));
  Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
@@ -150,6 +162,7 @@ class BillingStore : IDisposable{
  if(File.Exists(stateFile)){
  var saved=JsonSerializer.Deserialize<LocalBillingState>(File.ReadAllText(stateFile)) ?? throw new InvalidDataException("Empty billing state.");
  if(saved.Schema!=1)throw new InvalidDataException("Unsupported billing state schema.");
+ foreach(var item in saved.FinanceApprovals ?? [])financeApprovals[item.Key]=item.Value;
  foreach(var item in saved.Adjustments)adjustments.Add(item.Key,item.Value);
  foreach(var item in saved.Pbds)pbds[item.Key]=item.Value;
  foreach(var item in saved.Keys){if(!pbds.ContainsKey(item.Value))throw new InvalidDataException("Broken draft idempotency reference.");keys[item.Key]=item.Value;}
@@ -169,13 +182,19 @@ class BillingStore : IDisposable{
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
  public void Dispose(){processLock.Dispose();}
  void SaveLocal(){
- var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value));
+ var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value),financeApprovals);
  var temporary=stateFile+".tmp";
  using(var stream=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){
  JsonSerializer.Serialize(stream,snapshot);stream.Flush(true);
  }
  File.Move(temporary,stateFile,true);
  }
+ public bool HasFinanceApproval(string project,string hash){lock(adjustmentLock)return SubmissionGate.Matches(financeApprovals.GetValueOrDefault(project),hash,"Finance");}
+ public StateApproval SaveFinanceApproval(string project,StateApproval approval){lock(adjustmentLock){
+ var previous=financeApprovals.GetValueOrDefault(project);financeApprovals[project]=approval;
+ try{SaveLocal();}catch{if(previous is null)financeApprovals.Remove(project);else financeApprovals[project]=previous;throw;}
+ return approval;
+ }}
  public FinancialPosition Position(string project,List<WipLine> lines){
  lock(adjustmentLock) return BillingCalculations.Replay(Source(lines),adjustments.GetValueOrDefault(project) ?? []);
  }

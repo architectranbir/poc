@@ -28,3 +28,10 @@ These are domain controls, not completed authenticated API workflows. The curren
 Committed partial adjustments now fold into WIP, review availability and newly created PBD amounts. Adjustment requests require a positive amount, rationale and stable event ID. Identical retries have one in-process effect; conflicting event reuse and allocation overflow return HTTP 400. Approval and posting rederive the financial snapshot and reject a changed draft with HTTP 409.
 
 The local smoke test verifies those behaviors against the compiled API. This is still an in-memory, loopback-only development implementation. It does not prove persistence across restart, full commercial-state hashing, Finance gating, authenticated authorization or transactional posting. Full submission-gate integration remains pending.
+
+## Local restart recovery
+The development store now writes versioned atomic JSON snapshots for adjustments, drafts, draft idempotency keys, approvals and simulated posting references. Flush and file replacement occur before returning success; save failures restore the prior in-memory state. Startup loads the snapshot and acquires an exclusive process lock before listening. Invalid JSON, unsupported schema and broken draft-key references fail startup.
+
+Smoke coverage stops/restarts the API, verifies adjusted totals, repeats an adjustment and draft command, retrieves the same posting reference, rejects stale draft posting, checks exclusive store ownership and rejects corrupted JSON.
+
+This is a single-process local recovery adapter, not the Azure transactional relational store. It does not provide distributed concurrency, database transactions/outbox, disaster recovery or power-loss guarantees across filesystems. Hosted deployment remains disabled. COSMOS_ENDPOINT is rejected because the earlier write-only Cosmos path could not recover authoritative state. STATE_PATH selects an isolated development file; never use production financial data.

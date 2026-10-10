@@ -6,6 +6,8 @@ from pathlib import Path
 import socket
 import subprocess
 import time
+import tempfile
+import shutil
 import urllib.error
 import urllib.request
 
@@ -19,7 +21,8 @@ def run():
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
-    env = dict(os.environ, ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
+    state_dir = tempfile.mkdtemp(prefix="ledgerpilot-smoke-")
+    env = dict(os.environ, STATE_PATH=str(Path(state_dir) / "billing.json"), ASPNETCORE_ENVIRONMENT="Development", ASPNETCORE_URLS=base,
                FOUNDRY_PROJECT_ENDPOINT="", FOUNDRY_MODEL="", BLOB_CONTAINER="", COSMOS_ENDPOINT="")
     with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as api:
@@ -90,6 +93,41 @@ def run():
             request(f"/api/pbd/{fresh['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
             ai = request("/api/ai/explain", {"userMessage": "Explain", "projectId": p["id"]})
             assert ai["text"].startswith("AI not configured.")
+            api.terminate()
+            api.wait(timeout=5)
+            with subprocess.Popen([dotnet, str(dll)], cwd=root, env=env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as recovered:
+                try:
+                    deadline = time.monotonic() + 20
+                    while True:
+                        try:
+                            request("/health")
+                            break
+                        except OSError:
+                            if recovered.poll() is not None or time.monotonic() >= deadline:
+                                raise RuntimeError("Recovery startup failed")
+                            time.sleep(0.1)
+                    restored = request(f"/api/projects/{p['id']}/wip")
+                    assert restored["total"] == snapshot["total"] - 2
+                    request(f"/api/projects/{p['id']}/adjustments", adjustment)
+                    assert request(f"/api/projects/{p['id']}/wip")["total"] == restored["total"]
+                    same_doc = request(f"/api/projects/{p['id']}/pbd", body)
+                    assert same_doc["id"] == doc["id"]
+                    same_post = request(f"/api/pbd/{doc['id']}/post", {"actor": p["requestor"], "confirm": True})
+                    assert same_post["mockSapPostingId"] == posted["mockSapPostingId"]
+                    request(f"/api/pbd/{fresh['id']}/post", {"actor": p["requestor"], "confirm": True}, expected=409)
+                    # A second process must not share the single-process store.
+                    other = subprocess.run([dotnet, str(dll)], cwd=root, env=dict(env, ASPNETCORE_URLS="http://127.0.0.1:0"), capture_output=True, timeout=10)
+                    assert other.returncode != 0
+                finally:
+                    recovered.terminate()
+                    recovered.wait(timeout=5)
+            print("PASS: adjustment/draft/post recovery, persistent retry and single-process lock")
+            # Corruption must fail closed rather than silently reset financial state.
+            Path(env["STATE_PATH"]).write_text("{broken-json")
+            corrupted = subprocess.run([dotnet, str(dll)], cwd=root, env=env, capture_output=True, timeout=10)
+            assert corrupted.returncode != 0
+            print("PASS: corrupt state startup rejected")
             print("PASS: local API smoke (synthetic subset only; no live model or durable workflow)")
         finally:
             api.terminate()
@@ -104,6 +142,7 @@ def run():
     assert result.returncode != 0
     assert b"Local development baseline only" in result.stderr
     print("PASS: non-Development startup rejected")
+    shutil.rmtree(state_dir)
 
 
 if __name__ == "__main__":

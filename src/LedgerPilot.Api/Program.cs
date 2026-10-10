@@ -19,6 +19,8 @@ builder.Services.AddSingleton<BillingStore>();
 builder.Services.AddSingleton<BillingEngine>();
 builder.Services.AddSingleton<AiAssistant>();
 var app=builder.Build();
+// Validate/recover state and acquire exclusive store ownership before listening.
+app.Services.GetRequiredService<BillingStore>();
 app.Use(async (context, next) => {
  var remote = context.Connection.RemoteIpAddress;
  if (remote is null || !System.Net.IPAddress.IsLoopback(remote)) {
@@ -106,11 +108,23 @@ class BillingEngine{
  return f;}
  public string Hash(string project,decimal amount,string narrative)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{amount:F2}|{narrative}"))).ToLowerInvariant();
 }
-class BillingStore{
+record LocalBillingState(int Schema, Dictionary<string,List<AdjustmentEvent>> Adjustments, Dictionary<string,Pbd> Pbds, Dictionary<string,string> Keys);
+class BillingStore : IDisposable{
  readonly IConfiguration cfg; readonly ConcurrentDictionary<string,Pbd> pbds=new(); readonly ConcurrentDictionary<string,string> keys=new(); readonly Dictionary<string,List<AdjustmentEvent>> adjustments=new(); readonly object adjustmentLock=new();
- readonly CosmosClient? cosmos;
+ readonly string stateFile; readonly FileStream processLock;
  public BillingStore(IConfiguration c){cfg=c;
- var endpoint=c["COSMOS_ENDPOINT"];if(!string.IsNullOrWhiteSpace(endpoint))cosmos=new CosmosClient(endpoint,new DefaultAzureCredential());}
+ stateFile=Path.GetFullPath(c["STATE_PATH"] ?? Path.Combine(AppContext.BaseDirectory,"local-state","billing.json"));
+ Directory.CreateDirectory(Path.GetDirectoryName(stateFile)!);
+ processLock=new FileStream(stateFile+".lock",FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
+ if(File.Exists(stateFile)){
+ var saved=JsonSerializer.Deserialize<LocalBillingState>(File.ReadAllText(stateFile)) ?? throw new InvalidDataException("Empty billing state.");
+ if(saved.Schema!=1)throw new InvalidDataException("Unsupported billing state schema.");
+ foreach(var item in saved.Adjustments)adjustments.Add(item.Key,item.Value);
+ foreach(var item in saved.Pbds)pbds[item.Key]=item.Value;
+ foreach(var item in saved.Keys){if(!pbds.ContainsKey(item.Value))throw new InvalidDataException("Broken draft idempotency reference.");keys[item.Key]=item.Value;}
+ }
+
+ if(!string.IsNullOrWhiteSpace(c["COSMOS_ENDPOINT"]))throw new InvalidOperationException("This local store does not support Cosmos recovery. Use STATE_PATH.");}
  async Task<T> Load<T>(string file){
  var con=cfg["BLOB_CONTAINER"];
  if(!string.IsNullOrEmpty(con)){
@@ -122,7 +136,15 @@ class BillingStore{
  }
  public Task<List<Project>> Projects()=>Load<List<Project>>("projects.json");
  public Task<List<WipLine>> Lines()=>Load<List<WipLine>>("wip-lines.json");
- async Task Persist(string projectId,string id,object value){if(cosmos is not null){var container=cosmos.GetContainer("ledgerpilot","billing-state");await container.UpsertItemAsync(value,new PartitionKey(projectId));}}
+ public void Dispose(){processLock.Dispose();}
+ void SaveLocal(){
+ var snapshot=new LocalBillingState(1,adjustments,pbds.ToDictionary(x=>x.Key,x=>x.Value),keys.ToDictionary(x=>x.Key,x=>x.Value));
+ var temporary=stateFile+".tmp";
+ using(var stream=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None)){
+ JsonSerializer.Serialize(stream,snapshot);stream.Flush(true);
+ }
+ File.Move(temporary,stateFile,true);
+ }
  public FinancialPosition Position(string project,List<WipLine> lines){
  lock(adjustmentLock) return BillingCalculations.Replay(Source(lines),adjustments.GetValueOrDefault(project) ?? []);
  }
@@ -135,19 +157,31 @@ class BillingStore{
  var original=existing.FirstOrDefault(x=>x.EventId==req.EventId);
  ev=new(req.EventId,req.LineId,req.Action=="POSTPONE"?AdjustmentKind.Postpone:AdjustmentKind.WriteOff,req.Amount,req.Actor,req.Reason,original?.At ?? DateTimeOffset.UtcNow);
  BillingCalculations.Replay(Source(lines),existing.Append(ev));
- if(original is null){existing.Add(ev);adjustments[project]=existing;}
+ if(original is null){
+ var next=existing.Append(ev).ToList();adjustments[project]=next;
+ try{SaveLocal();}catch{if(existing.Count==0)adjustments.Remove(project);else adjustments[project]=existing;throw;}
  }
- await Persist(project,ev.EventId,new {id=ev.EventId,projectId=project,kind="adjustment",ev});return ev;
  }
- public async Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key){
+ await Task.CompletedTask;return ev;
+ }
+ public Task<Pbd> CreatePbd(string project,decimal amount,string currency,string hash,string actor,string key){
  if(string.IsNullOrWhiteSpace(key))throw new ArgumentException("Idempotency key required");
+ lock(adjustmentLock){
  var scope=$"{project}:create:{key}";
- if(keys.TryGetValue(scope,out var existing)&&pbds.TryGetValue(existing,out var old))return old;
+ if(keys.TryGetValue(scope,out var existing))return Task.FromResult(pbds[existing]);
  var doc=new Pbd($"PBD-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}",project,amount,currency,"DRAFT",1,hash,actor,null,null);
- var id=keys.GetOrAdd(scope,doc.Id);if(id!=doc.Id)return pbds[id];pbds[id]=doc;await Persist(project,doc.Id, new {id=doc.Id,projectId=project,kind="pbd",doc});return doc;}
+ keys[scope]=doc.Id;pbds[doc.Id]=doc;
+ try{SaveLocal();}catch{keys.TryRemove(scope,out _);pbds.TryRemove(doc.Id,out _);throw;}
+ return Task.FromResult(doc);
+ }}
  public Task<Pbd?> GetPbd(string id)=>Task.FromResult(pbds.TryGetValue(id,out var d)?d:null);
- public async Task<Pbd> ApprovePbd(string id,string actor){var d=pbds[id] with{Status="APPROVED",ApprovedBy=actor};pbds[id]=d;await Persist(d.ProjectId,id,new{id,projectId=d.ProjectId,kind="pbd",doc=d});return d;}
- public async Task<Pbd> PostPbd(string id){var old=pbds[id];if(old.Status=="POSTED")return old;var d=old with{Status="POSTED",MockSapPostingId=$"SIM-SAP-{Guid.NewGuid().ToString("N")[..10]}"};pbds[id]=d;await Persist(d.ProjectId,id,new{id,projectId=d.ProjectId,kind="pbd",doc=d});return d;}
+ Task<Pbd> UpdatePbd(string id,Func<Pbd,Pbd> update){lock(adjustmentLock){
+ var old=pbds[id];var next=update(old);pbds[id]=next;
+ try{SaveLocal();}catch{pbds[id]=old;throw;}return Task.FromResult(next);
+ }}
+ public Task<Pbd> ApprovePbd(string id,string actor)=>UpdatePbd(id,d=>d with{Status="APPROVED",ApprovedBy=actor});
+ public Task<Pbd> PostPbd(string id)=>UpdatePbd(id,d=>d.Status=="POSTED"?d:d with{Status="POSTED",MockSapPostingId=$"SIM-SAP-{Guid.NewGuid().ToString("N")[..10]}"});
+
 }
 class AiAssistant{
  readonly IConfiguration cfg;public AiAssistant(IConfiguration c)=>cfg=c;

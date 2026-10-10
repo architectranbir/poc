@@ -10,14 +10,14 @@ app.Use(async(context,next)=>{
  catch(CommandConflict ex){context.Response.StatusCode=409;await context.Response.WriteAsJsonAsync(new{error=ex.Message});}
 });
 app.MapGet("/health",()=>new{status="ok",system="Separate synthetic SAP simulator"});
-app.MapPost("/documents",(CreateDocument command,SimulatorStore store)=>Results.Ok(store.Create(command)));
+app.MapPost("/documents",(CreateDocument command,SimulatorStore store,HttpContext context)=>{var doc=store.Create(command);return context.Request.Headers["X-Simulate-Response-Loss"]=="true"?Results.StatusCode(503):Results.Ok(doc);});
 app.MapGet("/documents/{id}",(string id,SimulatorStore store)=>store.Get(id) is {} doc?Results.Ok(doc):Results.NotFound());
 app.MapGet("/commands/{key}",(string key,SimulatorStore store)=>store.Lookup(key) is {} doc?Results.Ok(doc):Results.NotFound());
-app.MapPost("/documents/{id}/post",(string id,PostDocument command,SimulatorStore store)=>Results.Ok(store.Post(id,command)));
+app.MapPost("/documents/{id}/post",(string id,PostDocument command,SimulatorStore store,HttpContext context)=>{var doc=store.Post(id,command);return context.Request.Headers["X-Simulate-Response-Loss"]=="true"?Results.StatusCode(503):Results.Ok(doc);});
 app.Run();
 record CreateDocument(string CommandKey,string ProjectId,decimal Net,string Currency,string StateHash);
 record PostDocument(string CommandKey,string StateHash);
-record SapDocument(string Id,CreateDocument Request,string Status,string? PostingReference);
+record SapDocument(string Id,CreateDocument Request,string Status,string? PostingReference,string? PostingCommandKey=null);
 record SimulatorSnapshot(int Schema,Dictionary<string,SapDocument> Documents,Dictionary<string,string> Commands);
 class CommandConflict(string message):Exception(message);
 class SimulatorStore:IDisposable{
@@ -52,7 +52,7 @@ class SimulatorStore:IDisposable{
  var key="post:"+request.CommandKey;
  if(commands.TryGetValue(key,out var existing)){if(existing!=id)throw new CommandConflict("Post command key reused for another document");return documents[id];}
  if(old.Status=="POSTED")throw new CommandConflict("Document already posted with another command key");
- var posted=old with{Status="POSTED",PostingReference="SAP-POST-"+Guid.NewGuid().ToString("N")};
+ var posted=old with{Status="POSTED",PostingReference="SAP-POST-"+Guid.NewGuid().ToString("N"),PostingCommandKey=request.CommandKey};
  documents[id]=posted;commands.Add(key,id);
  try{Save();}catch{documents[id]=old;commands.Remove(key);throw;}return posted;
  }}

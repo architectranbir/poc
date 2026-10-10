@@ -66,6 +66,36 @@ with tempfile.TemporaryDirectory(prefix='ledgerpilot-sap-') as state:
                     assert posted['postingReference'] == replies[0]['postingReference']
                 posted = replies[0]
                 request(post_path, {'commandKey': 'different-post', 'stateHash': command['stateHash']}, expected=409)
+                if restart == 0:
+                    spool = Path(state) / 'commands'
+                    spool.mkdir()
+                    worker_dll = root / 'src/LedgerPilot.SapWorker/bin/Release/net10.0/LedgerPilot.SapWorker.dll'
+                    worker_env = dict(env, DOTNET_ENVIRONMENT='Development', SAP_SIMULATOR_URL=base, SAP_COMMAND_PATH=str(spool), SIMULATE_RESPONSE_LOSS='true')
+                    create_path = spool / '01.command.json'
+                    worker_create = {'operation': 'Create', 'commandKey': 'worker-create', 'projectId': 'WORKER-1', 'net': 900, 'currency': 'GBP', 'stateHash': 'worker-state'}
+                    create_path.write_text(json.dumps(worker_create))
+                    def worker(expected):
+                        result = subprocess.run([dotnet, str(worker_dll)], env=worker_env, capture_output=True, timeout=20)
+                        assert result.returncode == expected, result.stderr
+                    worker(1)  # Source committed but returned a simulated lost response.
+                    assert not Path(str(create_path) + '.result.json').exists()
+                    source_doc = request('/commands/worker-create')
+                    worker(0)  # Fresh process reconciles instead of creating another document.
+                    create_result_path = Path(str(create_path) + '.result.json')
+                    receipt = json.loads(create_result_path.read_text())
+                    assert receipt['Response']['id'] == source_doc['id']
+                    post_command_path = spool / '02.command.json'
+                    post_command_path.write_text(json.dumps(dict(worker_create, operation='Post', commandKey='worker-post', documentId=source_doc['id'])))
+                    worker(1)
+                    posted_source = request(f"/documents/{source_doc['id']}")
+                    assert posted_source['status'] == 'POSTED'
+                    worker(0)
+                    post_receipt_path = Path(str(post_command_path) + '.result.json')
+                    post_receipt = post_receipt_path.read_text()
+                    assert json.loads(post_receipt)['Response']['postingReference'] == posted_source['postingReference']
+                    worker(0)
+                    assert post_receipt_path.read_text() == post_receipt
+                    print('PASS: worker lost-response reconciliation and durable receipts')
             finally:
                 api.terminate()
                 api.wait(timeout=5)

@@ -49,3 +49,7 @@ jobs:
       - name: Recent failed provisioning operations
         run: |
           az monitor activity-log list --resource-group rg-ledgerpilot-7dde6178 --offset 30m --status Failed --query '[].{time:eventTimestamp,resource:resourceId,operation:operationName.value,error:properties.statusMessage}' -o json
+      - name: Durable host execution evidence
+        run: |
+          workspace=$(az monitor log-analytics workspace show --resource-group rg-ledgerpilot-7dde6178 --workspace-name log-ledgerpilot-7dde6178 --query customerId -o tsv)
+          az monitor log-analytics query --workspace "$workspace" --analytics-query 'ContainerAppConsoleLogs_CL | where TimeGenerated > ago(30m) | where ContainerAppName_s == "ledgerpilot-7dde6178-workflows" | project TimeGenerated, Log_s | order by TimeGenerated desc | take 60' -o json

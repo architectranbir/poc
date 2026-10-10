@@ -78,6 +78,14 @@ public sealed class CommandStore(NpgsqlDataSource source)
         await tx.CommitAsync(ct);
     }
 
+    public async Task VerifyAccepted(string key, string canonicalPayload, CancellationToken ct = default)
+    {
+        await using var cmd = source.CreateCommand("SELECT payload FROM lp_command WHERE command_key=$1");
+        cmd.Parameters.AddWithValue(key);
+        if ((string?)await cmd.ExecuteScalarAsync(ct) != canonicalPayload)
+            throw new InvalidDataException("Command is not accepted or its content differs.");
+    }
+
     public async Task<string?> Receipt(string key, CancellationToken ct = default)
     {
         await using var cmd = source.CreateCommand("SELECT result FROM lp_receipt WHERE command_key=$1");

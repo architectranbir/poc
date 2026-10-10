@@ -9,7 +9,9 @@ public sealed class BillingSnapshotStore : IDisposable
     long revision;
     public BillingSnapshotStore(string connectionString)
     {
-        connection = new NpgsqlConnection(connectionString);
+        // Session advisory locks must not survive by returning a connection to the pool.
+        var settings = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
+        connection = new NpgsqlConnection(settings.ConnectionString);
         try {
             connection.Open();
             using var claim = new NpgsqlCommand("SELECT pg_try_advisory_lock(741286019)", connection);

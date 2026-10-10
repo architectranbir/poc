@@ -27,6 +27,7 @@ jobs:
       - run: dotnet test tests/LedgerPilot.Domain.Tests -c Release --no-build --logger "trx;LogFileName=domain.trx" --results-directory artifacts/tests
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - run: python3 scripts/smoke-local.py
+      - run: python3 scripts/smoke-simulator.py
       - run: npm ci && npm run build
         working-directory: web
       - uses: actions/upload-artifact@v4

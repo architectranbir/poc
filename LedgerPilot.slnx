@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/LedgerPilot.Api/LedgerPilot.Api.csproj" />
     <Project Path="src/LedgerPilot.Domain/LedgerPilot.Domain.csproj" />
+    <Project Path="src/LedgerPilot.SapSimulator/LedgerPilot.SapSimulator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/LedgerPilot.Domain.Tests/LedgerPilot.Domain.Tests.csproj" />

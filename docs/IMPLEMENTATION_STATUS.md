@@ -90,3 +90,8 @@ Smoke verifies one history entry after duplicate delivery and preserved actor/re
 New adjustment commands now save their before/after LineAllocation snapshots and a source-position hash in the same local JSON commit as the event. Failed saves restore both event and audit collections. History returns the stored snapshot for new events; legacy events without snapshots retain an explicitly labelled reconstructed projection.
 
 Compiled smoke changes an isolated source rate/amount after an adjustment and verifies unchanged saved audit data, then verifies the complete entry is identical after restart. Release build and smoke pass. This is immutable by application command semantics, not a tamper-proof/WORM store; authenticated browser tests, external audit retention and full source revision storage remain pending.
+
+## Separate SAP simulator service
+LedgerPilot.SapSimulator is a separate ASP.NET process with its own exclusive local state file. Create/retrieve/lookup/post contracts use persisted command keys and reject changed-content reuse or stale posting state. Concurrent repeated commands produce one document/posting reference and recover the same values after restart. The compiled HTTP smoke is included in CI.
+
+Release build and concurrent/restart smoke pass. This is a local trusted-command simulator, not a real SAP API and not yet connected to the billing worker. Service authentication, accrual APIs, PostgreSQL persistence, outbox/inbox, Durable Functions and Service Bus execution remain pending. Production simulator startup is disabled.

@@ -59,8 +59,10 @@ services:
     environment:
       FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
       AZURE_FUNCTIONS_ENVIRONMENT: Development
+      AzureWebJobsSecretStorageType: files
       AzureWebJobsStorage: UseDevelopmentStorage=true;DevelopmentStorageProxyUri=http://azurite
       COMMAND_STORE_CONNECTION: Host=postgres;Username=ledgerpilot;Password=local-demo-only;Database=ledgerpilot
+    volumes: ['./.container-secrets:/azure-functions-host/Secrets']
     ports: ['127.0.0.1:7071:80']
     restart: on-failure
     depends_on: [api, azurite]

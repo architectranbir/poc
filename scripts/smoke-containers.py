@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 import hashlib,json,subprocess,time,urllib.request,urllib.error
 base='http://127.0.0.1:8080'
+from pathlib import Path
+function_headers={'x-functions-key':json.loads(Path('.container-secrets/host.json').read_text())['masterKey']['value']}
 def request(path,body=None):
     r=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json'})
     with urllib.request.urlopen(r,timeout=10) as response:return json.load(response)
 def wait_url(url):
     for _ in range(180):
         try:
-            with urllib.request.urlopen(url,timeout=3) as response:return response.read()
+            with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers if ':7071/' in url else {}),timeout=3) as response:return response.read()
         except OSError:time.sleep(1)
     raise AssertionError('Container did not become ready: '+url)
 wait_url(base+'/health')
@@ -25,7 +27,7 @@ instance='posting-'+hashlib.sha256(('post:'+draft['id']).encode()).hexdigest()
 url='http://127.0.0.1:7071/runtime/webhooks/durabletask/instances/'+instance+'?taskHub=LedgerPilotPosting'
 def workflow_status():
     try:
-        with urllib.request.urlopen(url,timeout=5) as r:return json.load(r)
+        with urllib.request.urlopen(urllib.request.Request(url,headers=function_headers),timeout=5) as r:return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code==404:return None
         raise

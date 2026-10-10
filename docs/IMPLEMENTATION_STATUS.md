@@ -75,3 +75,8 @@ The API derives net from committed state and exposes a synthetic dated rate/sour
 Drafts now save the converted net, billing currency, VAT/gross, FX metadata and narrative. VAT acknowledgement is mandatory; alternate-currency creation also requires explicit currency confirmation. Finance state hashes include current commercial policy/master fields, while draft hashes additionally bind the saved narrative. Approval/posting rederive this state. Earlier draft hashes fail revalidation and require a new draft.
 
 Smoke verifies GBP/VAT reconciliation, VAT acknowledgement rejection, EUR currency confirmation, synthetic FX/reverse-charge result and changed billing-email rejection using isolated seed copies. Builds and smoke pass. This extends the supported commercial slice, not every dependency: alternate manually specified amounts, commercial edits via authorized UI, complete finding revalidation and external simulator contracts remain pending. The rate remains synthetic.
+
+## Fixed-price schedule validation
+A separate fixed-price calculator validates contract/history values, unique milestone identity, due cutoff, cancellation, partially/fully billed amounts and remaining contract capacity. It derives the proposed bill solely from selected outstanding milestone values. Eleven new domain cases pass (47 total).
+
+The API preview reads a server-side synthetic schedule; callers supply only cutoff and milestone selection. Smoke verifies the due £20,000 milestone and rejects already billed, future, unknown and duplicate selections. The fixture explicitly separates past/due/future milestones. Fixed-price draft selection, schedule concurrency, posting updates and UI integration remain pending; V-11 remains partial.

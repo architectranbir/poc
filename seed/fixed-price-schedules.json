@@ -1,0 +1,12 @@
+[
+  {
+    "projectId": "CU33924501P01",
+    "contractValue": 50000,
+    "previouslyBilled": 10000,
+    "milestones": [
+      {"id":"FP-01","dueDate":"2026-09-01","amount":10000,"alreadyBilled":10000,"cancelled":false},
+      {"id":"FP-02","dueDate":"2026-10-10","amount":20000,"alreadyBilled":0,"cancelled":false},
+      {"id":"FP-03","dueDate":"2026-11-01","amount":20000,"alreadyBilled":0,"cancelled":false}
+    ]
+  }
+]

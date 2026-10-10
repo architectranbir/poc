@@ -23,7 +23,7 @@ V-07,PARTIAL,Email/PO presence
 V-08,PARTIAL,Member-firm missing end client
 V-09,PARTIAL,Member-firm receiving code
 V-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-V-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+V-11,PARTIAL,Fixed-price calculator and server-schedule preview tested; draft integration pending
 V-12,PARTIAL,Decimal currency/VAT preview tested; draft commercial integration pending
 P-01,PARTIAL,API folds committed adjustments; durable recovery and complete acceptance pending
 P-02,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests

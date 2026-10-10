@@ -33,13 +33,13 @@ P-05,PARTIAL,Audit threshold check
 P-06,PARTIAL,Strict greater-than threshold
 P-07,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
 P-08,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-P-09,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-P-10,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-09,PARTIAL,Pure submission controls tested; API and persistence integration pending
+P-10,PARTIAL,Pure submission controls tested; API and persistence integration pending
 P-11,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
-P-12,PARTIAL,Explicit draft confirmation basic
+P-12,PARTIAL,Pure submission controls tested; API and persistence integration pending
 P-13,PARTIAL,Mock PBD create basic
 P-14,PARTIAL,Mock PBD retrieval in memory
 P-15,PARTIAL,Approver role basic
 P-16,PARTIAL,Mock post after approval basic
-P-17,NOT IMPLEMENTED,Requires source-aligned implementation and golden tests
+P-17,PARTIAL,Pure submission controls tested; API and persistence integration pending
 P-18,PARTIAL,Best-effort in-memory duplicate suppression; not durable

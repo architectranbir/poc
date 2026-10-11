@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import urllib.request
+import uuid
 
 API_VERSION = '2024-03-01'
 subscription = os.environ['AZURE_SUBSCRIPTION_ID']
@@ -19,7 +20,9 @@ def arm(path='', method='GET', body=None):
     args = ['az', 'rest', '--method', method, '--url', base + path + '?api-version=' + API_VERSION]
     if body is not None:
         args += ['--body', json.dumps(body)]
-    response = subprocess.run(args, check=True, text=True, capture_output=True)
+    response = subprocess.run(args, text=True, capture_output=True)
+    if response.returncode:
+        raise RuntimeError('ARM request failed: ' + response.stderr.strip())
     return json.loads(response.stdout) if response.stdout.strip() else {}
 
 
@@ -45,7 +48,8 @@ def replace(desired_image):
     if len(candidates) != 1:
         raise ValueError('Expected exactly one demo container.')
     candidates[0]['image'] = desired_image
-    template.pop('revisionSuffix', None)
+    suffix = 'release-' + uuid.uuid4().hex[:10]
+    template['revisionSuffix'] = suffix
     # Patch only the complete existing template. Configuration, identity, ingress,
     # registries and secrets are neither read back as values nor overwritten.
     arm(method='PATCH', body={'location': existing['location'], 'properties': {'template': template}})
@@ -56,8 +60,10 @@ def replace(desired_image):
             raise RuntimeError('Azure reported failed demo revision provisioning.')
         if props.get('provisioningState') == 'Succeeded' and demo_image(resource) == desired_image:
             revision = props.get('latestRevisionName')
-            if revision:
-                arm('/revisions/' + revision + '/activate', 'POST')
+            if revision and revision.endswith('--' + suffix):
+                current = arm('/revisions/' + revision)
+                if not current['properties'].get('active'):
+                    arm('/revisions/' + revision + '/activate', 'POST')
                 return resource
         time.sleep(5)
     raise TimeoutError('Azure demo revision provisioning did not complete.')

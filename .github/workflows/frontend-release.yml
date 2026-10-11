@@ -1,0 +1,96 @@
+name: Release verified conversation frontend
+on:
+  workflow_run:
+    workflows: ['Container end-to-end checks']
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ledgerpilot-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure-poc-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'acrlp7dde6178' }}
+      ACR_SERVER: ${{ vars.AZURE_ACR_SERVER || 'acrlp7dde6178.azurecr.io' }}
+      RESOURCE_GROUP: rg-ledgerpilot-${{ vars.AZURE_NAME_SUFFIX || '7dde6178' }}
+      APP_NAME: ledgerpilot-${{ vars.AZURE_NAME_SUFFIX || '7dde6178' }}-demo
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Release only the current verified main commit
+        id: current
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$latest" = "$RELEASE_SHA" ]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+            echo 'A newer main commit exists; skipping this superseded release.'
+          fi
+      - uses: azure/login@v2
+        if: steps.current.outputs.deploy == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID || '8ed05bb8-398a-40c5-ad12-0a0bc39995e8' }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || 'fcf67057-50c9-4ad4-98f3-ffca64add9e9' }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || '5c3f194f-27c4-47eb-bb4e-30400040fa00' }}
+      - name: Publish the verified combined React and API image
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          az acr login --name "$ACR_NAME"
+          image="$ACR_SERVER/ledgerpilot-demo:$RELEASE_SHA"
+          docker build -f containers/Dockerfile.demo -t "$image" .
+          docker push "$image"
+      - name: Replace the existing demo revision and restore it if verification fails
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$latest" != "$RELEASE_SHA" ]; then
+            echo 'A newer main commit exists; leaving the current demo revision unchanged.'
+            exit 0
+          fi
+          previous=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query properties.latestReadyRevisionName -o tsv)
+          test -n "$previous" && test "$previous" != 'None'
+          previous_image=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query "properties.template.containers[?name=='demo'].image | [0]" -o tsv)
+          test -n "$previous_image" && test "$previous_image" != 'None'
+          restore_previous() {
+            result=$?
+            trap - EXIT
+            if [ "$result" -ne 0 ]; then
+              for revision in $(az containerapp revision list --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query '[?properties.active].name' -o tsv); do
+                az containerapp revision deactivate --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --revision "$revision" || true
+              done
+              az containerapp update --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --container-name demo --image "$previous_image" --output none
+              restored=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query properties.latestRevisionName -o tsv)
+              az containerapp revision activate --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --revision "$restored"
+            fi
+            exit "$result"
+          }
+          trap restore_previous EXIT
+          # The API deliberately permits one database writer. Stop the previous
+          # revision before replacement; this can briefly interrupt the synthetic demo.
+          for revision in $(az containerapp revision list --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query '[?properties.active].name' -o tsv); do
+            az containerapp revision deactivate --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --revision "$revision"
+          done
+          az containerapp update --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --container-name demo --image "$ACR_SERVER/ledgerpilot-demo:$RELEASE_SHA" --output none
+          revision=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query properties.latestRevisionName -o tsv)
+          az containerapp revision activate --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --revision "$revision"
+          url="https://$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$APP_NAME" --query properties.configuration.ingress.fqdn -o tsv)"
+          curl --fail --silent --show-error --retry 18 --retry-delay 5 --retry-all-errors "$url/health"
+          curl --fail --silent --show-error "$url/" > deployed-index.html
+          # Verify that the served HTML references this release's exact built bundle.
+          docker run --rm --entrypoint cat "$ACR_SERVER/ledgerpilot-demo:$RELEASE_SHA" /app/wwwroot/index.html > expected-index.html
+          cmp expected-index.html deployed-index.html
+          printf 'Verified frontend release `%s` on %s\n' "$RELEASE_SHA" "$url" >> "$GITHUB_STEP_SUMMARY"

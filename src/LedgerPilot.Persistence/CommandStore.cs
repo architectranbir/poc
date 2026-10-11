@@ -7,7 +7,13 @@ public sealed class CommandStore(NpgsqlDataSource source)
 {
     public async Task Initialize(CancellationToken ct = default)
     {
-        await using var cmd = source.CreateCommand("""
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        // API, worker, dispatcher and Functions may boot together. Serialize additive
+        // schema creation; IF NOT EXISTS alone can still race in PostgreSQL catalogs.
+        await using var migrationLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(73010453820)", connection, tx);
+        await migrationLock.ExecuteNonQueryAsync(ct);
+        await using var cmd = new NpgsqlCommand("""
             CREATE TABLE IF NOT EXISTS lp_command (
               command_key text PRIMARY KEY, payload text NOT NULL,
               accepted_at timestamptz NOT NULL DEFAULT now());
@@ -23,8 +29,9 @@ public sealed class CommandStore(NpgsqlDataSource source)
             CREATE TABLE IF NOT EXISTS lp_workflow_tracking (
               command_key text PRIMARY KEY REFERENCES lp_command(command_key),
               scheduled_at timestamptz NOT NULL DEFAULT now());
-            """);
+            """, connection, tx);
         await cmd.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task Accept(string key, string canonicalPayload, CancellationToken ct = default)

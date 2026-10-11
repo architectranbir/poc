@@ -11,6 +11,27 @@ public sealed class WorkflowDiscoveryTests
         ?? throw new InvalidOperationException("POSTGRES_TEST_CONNECTION is required."));
 
     [Fact]
+    public async Task ConcurrentHostsCanInitializeAnEmptySchema()
+    {
+        await using var source = Source();
+        var schema = "workflow_test_" + Guid.NewGuid().ToString("N");
+        await using var create = source.CreateCommand($"CREATE SCHEMA {schema}");
+        await create.ExecuteNonQueryAsync();
+        try {
+            var connection = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("POSTGRES_TEST_CONNECTION")!) { SearchPath = schema };
+            await using var isolated = NpgsqlDataSource.Create(connection.ConnectionString);
+            await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => new CommandStore(isolated).Initialize()));
+            await using var tables = isolated.CreateCommand("SELECT count(*) FROM information_schema.tables WHERE table_schema=$1");
+            tables.Parameters.AddWithValue(schema);
+            Assert.Equal(5L, await tables.ExecuteScalarAsync());
+        }
+        finally {
+            await using var drop = source.CreateCommand($"DROP SCHEMA {schema} CASCADE");
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
     public async Task ReceiptBeforeTimerRemainsDiscoverableUntilTrackingIsDurable()
     {
         await using var source = Source(); var store = new CommandStore(source); await store.Initialize();

@@ -20,6 +20,9 @@ public sealed class CommandStore(NpgsqlDataSource source)
             CREATE TABLE IF NOT EXISTS lp_receipt (
               command_key text PRIMARY KEY REFERENCES lp_command(command_key),
               result text NOT NULL, completed_at timestamptz NOT NULL DEFAULT now());
+            CREATE TABLE IF NOT EXISTS lp_workflow_tracking (
+              command_key text PRIMARY KEY REFERENCES lp_command(command_key),
+              scheduled_at timestamptz NOT NULL DEFAULT now());
             """);
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -140,10 +143,19 @@ public sealed class CommandStore(NpgsqlDataSource source)
         cmd.Parameters.AddWithValue(key);return (string?)await cmd.ExecuteScalarAsync(ct);
     }
 
-    public async Task<string[]> PendingPostings(CancellationToken ct = default)
+    public async Task<string[]> UntrackedPostings(CancellationToken ct = default)
     {
-        // Only syntactically valid accepted posting commands; fixture-only text records are ignored.
-        await using var cmd = source.CreateCommand("SELECT c.command_key,c.payload FROM lp_command c LEFT JOIN lp_receipt r USING(command_key) WHERE r.command_key IS NULL ORDER BY c.accepted_at LIMIT 1000");
+        // Receipt arrival must not hide a command from the timer. Exclude only commands
+        // whose deterministic Durable instance has already been scheduled or observed.
+        // Filter non-posting fixtures before the batch limit so they cannot starve discovery.
+        await using var cmd = source.CreateCommand("""
+            SELECT c.command_key,c.payload FROM lp_command c
+            LEFT JOIN lp_workflow_tracking w USING(command_key)
+            WHERE w.command_key IS NULL AND
+              CASE WHEN pg_input_is_valid(c.payload, 'jsonb')
+                THEN c.payload::jsonb->>'Operation' END = 'CreateAndPost'
+            ORDER BY c.accepted_at,c.command_key LIMIT 1000
+            """);
         await using var reader = await cmd.ExecuteReaderAsync(ct);var keys = new List<string>();
         while (await reader.ReadAsync(ct)) {
             try {
@@ -154,6 +166,15 @@ public sealed class CommandStore(NpgsqlDataSource source)
             } catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException) { }
         }
         return keys.ToArray();
+    }
+
+    // Call only after Durable confirms scheduling or an existing stable instance ID.
+    // A crash before this insert rediscovers the command and checks that same ID.
+    public async Task MarkPostingTracked(string key, CancellationToken ct = default)
+    {
+        await using var cmd = source.CreateCommand("INSERT INTO lp_workflow_tracking(command_key) VALUES ($1) ON CONFLICT DO NOTHING");
+        cmd.Parameters.AddWithValue(key);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task VerifyAccepted(string key, string canonicalPayload, CancellationToken ct = default)

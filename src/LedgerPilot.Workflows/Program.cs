@@ -13,4 +13,5 @@ var host = new HostBuilder().ConfigureFunctionsWorkerDefaults()
         services.AddSingleton<CommandStore>();
         services.AddSingleton<PostingReceiptReader>();
     }).Build();
+await host.Services.GetRequiredService<CommandStore>().Initialize();
 await host.RunAsync();

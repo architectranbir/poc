@@ -1,3 +1,25 @@
+# Current implementation status — 11 October 2026
+
+The sections below the current summary are historical delivery notes. Their earlier limitations are superseded only where the current summary explicitly records later implementation or evidence.
+
+| Area | Current evidence / remaining work |
+|---|---|
+| Azure synthetic demo | Runtime deployment succeeded on 10 October; Container Apps and PostgreSQL are in Central India. South India PostgreSQL provisioning was restricted. |
+| Public billing journey | Deployed Chromium test passed: bulk WIP adjustment, acknowledgement, draft, approval and simulated SAP posting. |
+| Persistence and messaging | PostgreSQL billing/command state, transactional outbox, Service Bus worker and receipt reconciliation are implemented; container end-to-end checks passed. |
+| Durable Functions | Local/container orchestration tests passed. Azure diagnostic succeeded but returned runtime inventory only; that output does not prove a deployed orchestration executed. |
+| Durable discovery follow-up | Persistently discover accepted postings independently of SAP receipt arrival. Mark tracking only after scheduling or finding the stable instance. Regression tests include a receipt-before-timer posting and restart. Validation results belong in the PR/CI evidence. |
+| Foundry | SDK integration compiled; live model deployment/inference and evaluation remain unverified. |
+| Rule coverage | Full 44-rule acceptance remains incomplete. See rule-coverage.csv; it is a conservative baseline and needs reconciliation with newer implementation evidence. |
+| Authentication | Entra API/MSAL implementation exists. Public HostedDemo uses synthetic personas and has no end-user login; it is not a production financial deployment. |
+| SAP | Separate simulator only; no real SAP integration. |
+
+Workflow discovery uses `lp_workflow_tracking`, a separate durable scheduling marker. An external receipt cannot remove an unscheduled command from discovery. A crash after Durable accepts scheduling but before the marker is saved retries discovery using the same deterministic instance ID. Marking does not authorize, publish or post a financial command. The workflow host initializes the additive table before timers run. Keep the current single workflow replica; concurrent scheduling across hosts is not newly guaranteed by this change.
+
+Logs record hashed instance IDs and receipt status without financial amounts, narratives or posting references. Information logs now distinguish actual tracking/receipt activity from host inventory. Cloud orchestration evidence still requires a deployment of this change and a correlated synthetic billing run.
+
+## Historical delivery notes
+
 # Implementation truth table
 
 | Item | Status | Notes |

@@ -124,6 +124,25 @@ with tempfile.TemporaryDirectory() as tmp:
             assert request(path+'/post',dict(actor=actor,confirm=True))==posted
             api.terminate();api.wait(timeout=5);api=start()
             assert request(path)==posted
+            if workflow_url:
+                # Complete another posting while the timer host is stopped. Receipt
+                # arrival must not prevent discovery after the host restarts.
+                host.terminate();host.wait(timeout=15)
+                late=request('/api/projects/'+p['id']+'/pbd',dict(body,idempotencyKey='pg-late-workflow',narrative='Receipt before timer'))
+                late_path='/api/pbd/'+late['id']
+                request(late_path+'/approve',dict(actor=actor,confirm=True,stateHash=late['stateHash'],version=late['version']))
+                request(late_path+'/post',dict(actor=actor,confirm=True))
+                late_command=dict(Operation='CreateAndPost',CommandKey='post:'+late['id'],ProjectId=late['projectId'],Net=late['amount'],Currency=late['currency'],StateHash=late['stateHash'],DocumentId=None)
+                (spool/'post.command.json').write_text(json.dumps(late_command))
+                result=subprocess.run([dotnet,str(worker)],env=dict(worker_env,SIMULATE_RESPONSE_LOSS='false'),capture_output=True,timeout=20)
+                assert result.returncode==0,result.stderr
+                assert request(late_path)['status']=='POSTED'
+                instance='posting-'+hashlib.sha256(('post:'+late['id']).encode()).hexdigest()
+                workflow_url=workflow_base+'/runtime/webhooks/durabletask/instances/'+instance+'?taskHub=LedgerPilotPosting'
+                host=start_host()
+                outcome=wait_workflow(['Completed'])['output']
+                assert outcome.get('status',outcome.get('Status'))=='Posted',outcome
+                print('PASS: posting completed before timer was discovered and tracked after host restart')
             print('PASS: PostgreSQL API accepted posting, restart, separate worker lost-response recovery and durable SAP receipt')
         finally:
             simulator.terminate();simulator.wait(timeout=5)

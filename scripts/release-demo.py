@@ -94,9 +94,17 @@ def main():
             deactivate_active()
             replace(image)
         healthy(url)
-        with urllib.request.urlopen(url + '/', timeout=15) as response:
-            if response.read() != expected:
-                raise RuntimeError('Served frontend HTML differs from the exact release image.')
+        for attempt in range(60):
+            try:
+                request = urllib.request.Request(url + '/?release=' + image.rsplit(':', 1)[-1], headers={'Cache-Control': 'no-cache'})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    if response.read() == expected:
+                        break
+            except OSError:
+                pass
+            time.sleep(5)
+        else:
+            raise RuntimeError('Served frontend HTML differs from the exact release image after traffic propagation wait.')
     except Exception:
         print('Release verification failed; restoring the previous demo image.', flush=True)
         deactivate_active()

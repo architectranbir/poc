@@ -30,6 +30,8 @@ jobs:
           npx --prefix tests/browser playwright install --with-deps chromium
       - name: Test React billing journey
         run: node tests/browser/posting.mjs
+      - name: Test conversation workspace interactions and mobile layout
+        run: node tests/browser/conversation.mjs
       - name: Test hosted demo without Entra registration
         env:
           API_URL: http://localhost:8088

@@ -154,7 +154,13 @@ public sealed class CommandStore(NpgsqlDataSource source)
     // Its execution queue is independent of the Durable scheduling marker.
     public async Task<string[]> PendingPostings(CancellationToken ct = default)
     {
-        await using var cmd = source.CreateCommand("SELECT c.command_key,c.payload FROM lp_command c LEFT JOIN lp_receipt r USING(command_key) WHERE r.command_key IS NULL ORDER BY c.accepted_at LIMIT 1000");
+        await using var cmd = source.CreateCommand("""
+            SELECT c.command_key,c.payload FROM lp_command c LEFT JOIN lp_receipt r USING(command_key)
+            WHERE r.command_key IS NULL AND
+              CASE WHEN pg_input_is_valid(c.payload, 'jsonb')
+                THEN c.payload::jsonb->>'Operation' END = 'CreateAndPost'
+            ORDER BY c.accepted_at,c.command_key LIMIT 1000
+            """);
         return await ReadPostingKeys(cmd, ct);
     }
 

@@ -73,5 +73,6 @@ public sealed class WorkflowDiscoveryTests
         Assert.Contains(key, candidates);
         Assert.DoesNotContain(createKey, candidates);
         Assert.DoesNotContain(candidates, value => value.StartsWith(prefix));
+        Assert.Contains(key, await store.PendingPostings());
     }
 }

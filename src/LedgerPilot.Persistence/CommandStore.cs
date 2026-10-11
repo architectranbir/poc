@@ -150,6 +150,14 @@ public sealed class CommandStore(NpgsqlDataSource source)
         cmd.Parameters.AddWithValue(key);return (string?)await cmd.ExecuteScalarAsync(ct);
     }
 
+    // The offline SAP worker must still discover only work without a receipt.
+    // Its execution queue is independent of the Durable scheduling marker.
+    public async Task<string[]> PendingPostings(CancellationToken ct = default)
+    {
+        await using var cmd = source.CreateCommand("SELECT c.command_key,c.payload FROM lp_command c LEFT JOIN lp_receipt r USING(command_key) WHERE r.command_key IS NULL ORDER BY c.accepted_at LIMIT 1000");
+        return await ReadPostingKeys(cmd, ct);
+    }
+
     public async Task<string[]> UntrackedPostings(CancellationToken ct = default)
     {
         // Receipt arrival must not hide a command from the timer. Exclude only commands
@@ -163,6 +171,11 @@ public sealed class CommandStore(NpgsqlDataSource source)
                 THEN c.payload::jsonb->>'Operation' END = 'CreateAndPost'
             ORDER BY c.accepted_at,c.command_key LIMIT 1000
             """);
+        return await ReadPostingKeys(cmd, ct);
+    }
+
+    static async Task<string[]> ReadPostingKeys(NpgsqlCommand cmd, CancellationToken ct)
+    {
         await using var reader = await cmd.ExecuteReaderAsync(ct);var keys = new List<string>();
         while (await reader.ReadAsync(ct)) {
             try {

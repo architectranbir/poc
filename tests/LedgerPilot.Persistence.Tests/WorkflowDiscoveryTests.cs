@@ -40,6 +40,7 @@ public sealed class WorkflowDiscoveryTests
         // The SAP worker has finished before the one-minute timer first discovers this command.
         await store.Complete(key, "receipt-already-committed");
         Assert.Contains(key, await store.UntrackedPostings());
+        Assert.DoesNotContain(key, await store.PendingPostings());
 
         // Scheduling succeeded, but a process crash occurred before the tracking insert.
         // A fresh timer must rediscover the key and inspect the same Durable instance ID.
